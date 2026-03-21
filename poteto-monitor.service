@@ -1,0 +1,12 @@
+[Unit]
+Description=Poteto Monitor - BTC/ETH price check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=poteto
+WorkingDirectory=/opt/poteto-monitor
+ExecStart=/opt/poteto-monitor/venv/bin/python monitor.py
+StandardOutput=journal
+StandardError=journal

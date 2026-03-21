@@ -1,0 +1,10 @@
+[Unit]
+Description=Poteto Monitor - hourly timer
+Requires=poteto-monitor.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
