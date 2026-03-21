@@ -73,6 +73,7 @@ cd poteto-monitor
 ### 2. インストール
 
 ```bash
+apt-get install -y sudo
 chmod +x install.sh
 sudo ./install.sh
 ```
