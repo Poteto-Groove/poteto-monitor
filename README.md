@@ -126,3 +126,5 @@ export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 export ALERT_THRESHOLD=10
 python monitor.py
 ```
+###
+最近ETHの動向を確認する機会が増えていて、友人も確認できたら良いということで作成しました。
