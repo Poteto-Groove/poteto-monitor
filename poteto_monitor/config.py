@@ -20,6 +20,11 @@ HISTORY_FILE = DATA_DIR / "history.json"
 
 DEFAULT_THRESHOLD = 10.0
 DEFAULT_HISTORY_LIMIT = 168  # 7 日分（毎時実行時）
+DEFAULT_POLL_INTERVAL = 60  # 秒。Web ダッシュボードの更新間隔
+MIN_POLL_INTERVAL = 5  # API のレート制限を守るための下限
+DEFAULT_REPORT_INTERVAL = 3600  # 秒。Discord 定期レポートの間隔
+DEFAULT_WEB_HOST = "127.0.0.1"
+DEFAULT_WEB_PORT = 8787
 
 # config.json が無い場合の既定監視リスト。
 DEFAULT_WATCH: list[dict] = [
@@ -40,6 +45,11 @@ class Config:
     base_currency: str
     history_limit: int
     assets: list[Asset]
+    poll_interval: int = DEFAULT_POLL_INTERVAL
+    report_interval: int = DEFAULT_REPORT_INTERVAL
+    web_host: str = DEFAULT_WEB_HOST
+    web_port: int = DEFAULT_WEB_PORT
+    web_auth_token: str = ""
 
 
 def _as_bool(value) -> bool:
@@ -115,16 +125,26 @@ def parse_config(raw: dict) -> Config:
         seen.add(asset.key)
         assets.append(asset)
 
+    web = raw.get("web") if isinstance(raw.get("web"), dict) else {}
+    poll_interval = int(os.environ.get("POLL_INTERVAL") or raw.get("poll_interval", DEFAULT_POLL_INTERVAL))
+    report_interval = int(raw.get("report_interval", DEFAULT_REPORT_INTERVAL))
+
     return Config(
         webhook_url=os.environ.get("DISCORD_WEBHOOK_URL") or raw.get("webhook_url", ""),
         alert_threshold=default_threshold,
         base_currency=str(os.environ.get("BASE_CURRENCY") or raw.get("base_currency", "usd")).lower(),
         history_limit=int(raw.get("history_limit", DEFAULT_HISTORY_LIMIT)),
         assets=assets,
+        poll_interval=max(MIN_POLL_INTERVAL, poll_interval),
+        report_interval=max(0, report_interval),
+        web_host=str(os.environ.get("WEB_HOST") or web.get("host", DEFAULT_WEB_HOST)),
+        web_port=int(os.environ.get("WEB_PORT") or web.get("port", DEFAULT_WEB_PORT)),
+        web_auth_token=str(os.environ.get("WEB_AUTH_TOKEN") or web.get("auth_token", "")),
     )
 
 
-def load_config(path: Path = CONFIG_FILE) -> Config:
+def load_config(path: Path | None = None) -> Config:
+    path = path or CONFIG_FILE
     raw: dict = {}
     if path.exists():
         try:
@@ -134,3 +154,79 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
         if not isinstance(raw, dict):
             raise ConfigError(f"{path} はオブジェクトである必要があります")
     return parse_config(raw)
+
+
+# ── Web エディタ用の生 JSON 入出力 ────────────────────────────────────
+WEBHOOK_MASK = "__keep__"  # UI に生の Webhook を返さないための番兵値
+
+
+def read_raw(path: Path | None = None) -> dict:
+    """config.json をそのまま辞書で読む（既定値で補完）。"""
+    path = path or CONFIG_FILE
+    raw: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw = loaded
+        except json.JSONDecodeError:
+            raw = {}
+    raw.setdefault("watch", list(DEFAULT_WATCH))
+    raw.setdefault("alert_threshold", DEFAULT_THRESHOLD)
+    raw.setdefault("base_currency", "usd")
+    raw.setdefault("history_limit", DEFAULT_HISTORY_LIMIT)
+    raw.setdefault("poll_interval", DEFAULT_POLL_INTERVAL)
+    raw.setdefault("report_interval", DEFAULT_REPORT_INTERVAL)
+    web = raw.get("web") if isinstance(raw.get("web"), dict) else {}
+    raw["web"] = {
+        "host": web.get("host", DEFAULT_WEB_HOST),
+        "port": web.get("port", DEFAULT_WEB_PORT),
+        "auth_token": web.get("auth_token", ""),
+    }
+    return raw
+
+
+def masked_view(raw: dict) -> dict:
+    """UI へ返す用に秘匿値を伏せた辞書を作る。"""
+    view = json.loads(json.dumps(raw))  # deep copy
+    view["webhook_configured"] = bool(raw.get("webhook_url"))
+    view["webhook_url"] = ""  # 生の URL は返さない
+    web = view.get("web") or {}
+    web["auth_configured"] = bool(web.get("auth_token"))
+    web["auth_token"] = ""
+    view["web"] = web
+    return view
+
+
+def merge_incoming(existing: dict, incoming: dict) -> dict:
+    """UI から来た設定を既存にマージ（空の秘匿値は現状維持）。"""
+    merged = json.loads(json.dumps(existing))
+    for key in ("alert_threshold", "base_currency", "history_limit", "poll_interval", "report_interval", "watch"):
+        if key in incoming:
+            merged[key] = incoming[key]
+
+    # Webhook: 空文字なら現状維持、値があれば更新。
+    new_hook = str(incoming.get("webhook_url", "")).strip()
+    if new_hook and new_hook != WEBHOOK_MASK:
+        merged["webhook_url"] = new_hook
+
+    inc_web = incoming.get("web") if isinstance(incoming.get("web"), dict) else {}
+    web = merged.get("web") if isinstance(merged.get("web"), dict) else {}
+    for key in ("host", "port"):
+        if key in inc_web:
+            web[key] = inc_web[key]
+    new_token = str(inc_web.get("auth_token", "")).strip()
+    if new_token:
+        web["auth_token"] = new_token
+    merged["web"] = web
+    return merged
+
+
+def write_raw(raw: dict, path: Path | None = None) -> None:
+    """検証してから config.json を保存する。"""
+    path = path or CONFIG_FILE
+    parse_config(raw)  # 不正なら ConfigError を送出
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)

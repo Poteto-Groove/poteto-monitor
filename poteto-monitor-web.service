@@ -1,0 +1,24 @@
+[Unit]
+Description=Poteto Monitor - live web dashboard & poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=poteto
+WorkingDirectory=/opt/poteto-monitor
+ExecStart=/opt/poteto-monitor/venv/bin/poteto-monitor serve
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 最小権限で動かすための systemd ハードニング
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/poteto-monitor
+
+[Install]
+WantedBy=multi-user.target

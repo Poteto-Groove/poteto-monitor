@@ -56,6 +56,7 @@ def fetch_crypto(assets: list[Asset], base_currency: str, *, session: requests.S
                 value=value,
                 display=display,
                 threshold=asset.threshold,
+                type="crypto",
                 fields={c: float(quote[c]) for c in asset.vs if c in quote},
             )
         )
@@ -93,6 +94,7 @@ def fetch_forex(assets: list[Asset], *, session: requests.Session | None = None)
                 value=rate,
                 display=display,
                 threshold=asset.threshold,
+                type="forex",
                 fields={f"{asset.base}{asset.quote}": rate},
             )
         )

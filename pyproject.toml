@@ -14,7 +14,8 @@ keywords = ["crypto", "forex", "monitoring", "discord", "coingecko"]
 dependencies = ["requests>=2.31"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+web = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8.0", "httpx>=0.27", "fastapi>=0.110", "uvicorn>=0.29"]
 
 [project.scripts]
 poteto-monitor = "poteto_monitor.monitor:main"
@@ -23,7 +24,10 @@ poteto-monitor = "poteto_monitor.monitor:main"
 Homepage = "https://github.com/Poteto-Groove/poteto-monitor"
 
 [tool.setuptools]
-packages = ["poteto_monitor"]
+packages = ["poteto_monitor", "poteto_monitor.web"]
+
+[tool.setuptools.package-data]
+"poteto_monitor.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

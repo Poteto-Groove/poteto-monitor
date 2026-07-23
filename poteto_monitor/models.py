@@ -34,4 +34,5 @@ class Reading:
     value: float  # 変化率計算に使う代表値
     display: str  # Discord に出す整形済み文字列
     threshold: float
+    type: str = ""  # "crypto" | "forex"
     fields: dict[str, float] = field(default_factory=dict)  # 履歴保存用の生値

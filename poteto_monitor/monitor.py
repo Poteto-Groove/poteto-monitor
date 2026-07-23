@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 
 from . import __version__
-from .config import HISTORY_FILE, PRICES_FILE, Config, ConfigError, load_config
+from .config import HISTORY_FILE, PRICES_FILE, Config, ConfigError, load_config  # noqa: F401
 from .notify import build_alert_embed, build_report_embed, find_alerts, send
 from .providers import ProviderError, fetch_all
 from .storage import load_json, load_previous, save_json
@@ -62,11 +62,33 @@ def run(cfg: Config, *, dry_run: bool = False) -> int:
     return 0
 
 
+def serve(cfg: Config) -> int:
+    """Web ダッシュボード + 常駐ポーラーを起動する。"""
+    try:
+        import uvicorn
+
+        from .web.context import AppContext
+        from .web.server import create_app
+    except ImportError:
+        log.error("Web 機能には追加依存が必要です: pip install 'poteto-monitor[web]'")
+        return 3
+
+    ctx = AppContext(cfg)
+    app = create_app(ctx)
+    log.info("Web ダッシュボードを起動: http://%s:%d", cfg.web_host, cfg.web_port)
+    if not cfg.web_auth_token:
+        log.warning("web.auth_token 未設定です。公開する場合は Cloudflare Access 等で保護してください。")
+    uvicorn.run(app, host=cfg.web_host, port=cfg.web_port, log_level="info")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="poteto-monitor",
         description="暗号資産と為替レートを監視して Discord へ通知します。",
     )
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "serve"],
+                        help="run: 1 回実行（既定） / serve: Web ダッシュボードを常駐起動")
     parser.add_argument("--dry-run", action="store_true", help="取得・整形のみ行い、送信も保存もしない")
     parser.add_argument("--version", action="version", version=f"poteto-monitor {__version__}")
     args = parser.parse_args(argv)
@@ -76,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         log.error("設定エラー: %s", exc)
         return 2
+
+    if args.command == "serve":
+        return serve(cfg)
 
     if not args.dry_run and not cfg.webhook_url:
         log.error("Discord Webhook URL が未設定です。")

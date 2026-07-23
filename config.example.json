@@ -3,6 +3,13 @@
   "alert_threshold": 10,
   "base_currency": "usd",
   "history_limit": 168,
+  "poll_interval": 60,
+  "report_interval": 3600,
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "auth_token": ""
+  },
   "watch": [
     { "type": "crypto", "id": "bitcoin",  "label": "Bitcoin (BTC)",  "emoji": "🟡", "vs": ["usd", "jpy"] },
     { "type": "crypto", "id": "ethereum", "label": "Ethereum (ETH)", "emoji": "🔷", "vs": ["usd", "jpy"] },
