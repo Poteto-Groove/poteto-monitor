@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poteto-monitor"
+version = "2.0.0"
+description = "設定ファイル駆動で暗号資産・為替レートを監視し Discord へ通知する軽量モニター"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Poteto Groove" }]
+keywords = ["crypto", "forex", "monitoring", "discord", "coingecko"]
+dependencies = ["requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+poteto-monitor = "poteto_monitor.monitor:main"
+
+[project.urls]
+Homepage = "https://github.com/Poteto-Groove/poteto-monitor"
+
+[tool.setuptools]
+packages = ["poteto_monitor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

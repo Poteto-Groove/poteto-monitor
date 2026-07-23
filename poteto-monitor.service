@@ -1,5 +1,5 @@
 [Unit]
-Description=Poteto Monitor - BTC/ETH price check
+Description=Poteto Monitor - crypto & forex price check
 After=network-online.target
 Wants=network-online.target
 
@@ -7,6 +7,13 @@ Wants=network-online.target
 Type=oneshot
 User=poteto
 WorkingDirectory=/opt/poteto-monitor
-ExecStart=/opt/poteto-monitor/venv/bin/python monitor.py
+ExecStart=/opt/poteto-monitor/venv/bin/poteto-monitor
 StandardOutput=journal
 StandardError=journal
+
+# 最小権限で動かすための systemd ハードニング
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/poteto-monitor
