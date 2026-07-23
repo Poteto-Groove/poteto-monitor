@@ -1,13 +1,15 @@
 [Unit]
-Description=Poteto Monitor - crypto & forex price check
+Description=Poteto Monitor - live web dashboard & poller
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 User=poteto
 WorkingDirectory=/opt/poteto-monitor
-ExecStart=/opt/poteto-monitor/venv/bin/poteto-monitor
+ExecStart=/opt/poteto-monitor/venv/bin/poteto-monitor serve
+Restart=always
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
@@ -17,3 +19,6 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/poteto-monitor
+
+[Install]
+WantedBy=multi-user.target

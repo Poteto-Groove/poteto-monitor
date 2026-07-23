@@ -1,0 +1,21 @@
+{
+  "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+  "alert_threshold": 10,
+  "base_currency": "usd",
+  "history_limit": 168,
+  "poll_interval": 60,
+  "report_interval": 3600,
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "auth_token": ""
+  },
+  "watch": [
+    { "type": "crypto", "id": "bitcoin",  "label": "Bitcoin (BTC)",  "emoji": "🟡", "vs": ["usd", "jpy"] },
+    { "type": "crypto", "id": "ethereum", "label": "Ethereum (ETH)", "emoji": "🔷", "vs": ["usd", "jpy"] },
+    { "type": "crypto", "id": "solana",   "label": "Solana (SOL)",   "emoji": "🌞", "vs": ["usd", "jpy"], "threshold": 15 },
+
+    { "type": "forex", "base": "USD", "quote": "JPY", "label": "ドル円 (USD/JPY)", "emoji": "💴", "threshold": 2 },
+    { "type": "forex", "base": "EUR", "quote": "JPY", "label": "ユーロ円 (EUR/JPY)", "emoji": "💶", "threshold": 2 }
+  ]
+}

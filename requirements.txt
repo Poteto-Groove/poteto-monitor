@@ -1,1 +1,2 @@
-requests>=2.31.0
+# ランタイム依存。`pip install .` を使う場合は pyproject.toml が優先されます。
+requests>=2.31
