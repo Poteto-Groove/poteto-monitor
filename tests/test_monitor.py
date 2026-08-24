@@ -26,7 +26,7 @@ class FakeResp:
 
 
 class FakeSession:
-    """URL に応じて CoinGecko / forex のレスポンスを返す最小スタブ。"""
+    """URL に応じて CoinGecko / forex / hyperliquid のレスポンスを返すスタブ。"""
 
     def get(self, url, params=None, timeout=None):
         if "coingecko" in url:
@@ -34,11 +34,18 @@ class FakeSession:
                 {
                     "bitcoin": {"usd": 100000.0, "jpy": 15000000.0},
                     "ethereum": {"usd": 4000.0, "jpy": 600000.0},
+                    "jpyc": {"usd": 0.0066},
+                    "usd-coin": {"usd": 1.0},
                 }
             )
         if "er-api" in url:
             return FakeResp({"result": "success", "rates": {"JPY": 157.0, "EUR": 0.92}})
-        raise AssertionError(f"unexpected url: {url}")
+        raise AssertionError(f"unexpected GET url: {url}")
+
+    def post(self, url, json=None, timeout=None):
+        if "hyperliquid" in url:
+            return FakeResp({"BTC": "101000.0", "ETH": "4050.0", "HYPE": "28.5"})
+        raise AssertionError(f"unexpected POST url: {url}")
 
 
 # ── format ────────────────────────────────────────────────────────────
@@ -116,6 +123,49 @@ def test_fetch_all_mixed():
     assert readings[0].value == 100000.0
     assert "¥" in readings[0].display  # jpy が括弧内に出る
     assert readings[1].value == 157.0
+
+
+def test_fetch_hyperliquid_and_ratio():
+    cfg = parse_config(
+        {
+            "watch": [
+                {"type": "hyperliquid", "coin": "HYPE"},
+                {"type": "hyperliquid", "coin": "BTC", "label": "BTC perp"},
+                {"type": "ratio", "num": "jpyc", "den": "usd-coin", "label": "JPYC/USDC"},
+            ]
+        }
+    )
+    readings = fetch_all(cfg.assets, cfg.base_currency, session=FakeSession())
+    by_key = {r.key: r for r in readings}
+    assert by_key["hl:HYPE"].value == 28.5
+    assert by_key["hl:HYPE"].type == "hyperliquid"
+    assert by_key["hl:BTC"].value == 101000.0
+    # ratio: price(jpyc)/price(usd-coin) = 0.0066 / 1.0
+    assert by_key["ratio:jpyc/usd-coin"].value == pytest.approx(0.0066)
+    assert "JPYC" in by_key["ratio:jpyc/usd-coin"].display
+
+
+def test_hyperliquid_and_ratio_config_parsing():
+    a = parse_config({"watch": [{"type": "hyperliquid", "coin": "hype"}]}).assets[0]
+    assert a.type == "hyperliquid" and a.coin == "HYPE" and a.key == "hl:HYPE"
+
+    r = parse_config({"watch": [{"type": "ratio", "pair": "jpyc/usd-coin"}]}).assets[0]
+    assert r.num == "jpyc" and r.den == "usd-coin"
+
+
+def test_hyperliquid_requires_coin():
+    with pytest.raises(ConfigError):
+        parse_config({"watch": [{"type": "hyperliquid"}]})
+
+
+def test_ratio_requires_num_den():
+    with pytest.raises(ConfigError):
+        parse_config({"watch": [{"type": "ratio", "num": "jpyc"}]})
+
+
+def test_unknown_type_rejected():
+    with pytest.raises(ConfigError):
+        parse_config({"watch": [{"type": "nasdaq", "id": "aapl"}]})
 
 
 # ── alerts ────────────────────────────────────────────────────────────

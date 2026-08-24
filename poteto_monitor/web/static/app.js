@@ -6,6 +6,8 @@ const SPARK_MAX = 60;
 
 const cards = new Map();      // key -> card element
 const series = new Map();     // key -> number[] (直近の値)
+const BADGE_LABEL = { crypto: "crypto", forex: "forex", hyperliquid: "HL", ratio: "rate" };
+const TPL = { crypto: "#tpl-crypto", forex: "#tpl-forex", hyperliquid: "#tpl-hyperliquid", ratio: "#tpl-ratio" };
 
 // ── 認証つき fetch ──────────────────────────────────────
 function authHeaders() {
@@ -90,7 +92,7 @@ function updateCard(el, a) {
   el.querySelector(".card-emoji").textContent = a.emoji || "•";
   el.querySelector(".card-label").textContent = a.label;
   const badge = el.querySelector(".badge");
-  badge.textContent = a.type; badge.className = "badge " + a.type;
+  badge.textContent = BADGE_LABEL[a.type] || a.type; badge.className = "badge " + a.type;
   el.querySelector(".card-price").textContent = a.display;
 
   const ch = el.querySelector(".card-change");
@@ -168,9 +170,8 @@ function fillSettings(cfg) {
 }
 
 function addWatchRow(entry) {
-  const type = entry.type === "forex" ? "forex" : "crypto";
-  const tpl = $(type === "forex" ? "#tpl-forex" : "#tpl-crypto");
-  const node = tpl.content.firstElementChild.cloneNode(true);
+  const type = TPL[entry.type] ? entry.type : "crypto";
+  const node = $(TPL[type]).content.firstElementChild.cloneNode(true);
   node.querySelector(".w-emoji").value = entry.emoji || "";
   node.querySelector(".w-label").value = entry.label || "";
   const thr = entry.threshold;
@@ -178,9 +179,14 @@ function addWatchRow(entry) {
   if (type === "crypto") {
     node.querySelector(".w-id").value = entry.id || "";
     node.querySelector(".w-vs").value = (entry.vs || ["usd", "jpy"]).join(",");
-  } else {
+  } else if (type === "forex") {
     node.querySelector(".w-base").value = entry.base || "";
     node.querySelector(".w-quote").value = entry.quote || "";
+  } else if (type === "hyperliquid") {
+    node.querySelector(".w-coin").value = entry.coin || "";
+  } else if (type === "ratio") {
+    node.querySelector(".w-num").value = entry.num || "";
+    node.querySelector(".w-den").value = entry.den || "";
   }
   node.querySelector(".w-del").addEventListener("click", () => { node.remove(); updateWatchCount(); });
   $("#watch-list").appendChild(node);
@@ -204,10 +210,17 @@ function collectWatch() {
       const vs = item.querySelector(".w-vs").value.split(",").map((s) => s.trim()).filter(Boolean);
       if (vs.length) e.vs = vs;
       if (!e.id) continue;
-    } else {
+    } else if (type === "forex") {
       e.base = item.querySelector(".w-base").value.trim();
       e.quote = item.querySelector(".w-quote").value.trim();
       if (!e.base || !e.quote) continue;
+    } else if (type === "hyperliquid") {
+      e.coin = item.querySelector(".w-coin").value.trim();
+      if (!e.coin) continue;
+    } else if (type === "ratio") {
+      e.num = item.querySelector(".w-num").value.trim();
+      e.den = item.querySelector(".w-den").value.trim();
+      if (!e.num || !e.den) continue;
     }
     out.push(e);
   }
@@ -253,6 +266,8 @@ $("#drawer").querySelector("[data-close]").addEventListener("click", closeSettin
 $("#btn-save").addEventListener("click", saveSettings);
 $("#add-crypto").addEventListener("click", () => addWatchRow({ type: "crypto", vs: ["usd", "jpy"] }));
 $("#add-forex").addEventListener("click", () => addWatchRow({ type: "forex" }));
+$("#add-hyperliquid").addEventListener("click", () => addWatchRow({ type: "hyperliquid" }));
+$("#add-ratio").addEventListener("click", () => addWatchRow({ type: "ratio" }));
 $("#btn-refresh").addEventListener("click", async () => {
   $("#btn-refresh").disabled = true;
   await authFetch("/api/refresh", { method: "POST" }).catch(() => {});

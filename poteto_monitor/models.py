@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 class Asset:
     """監視対象 1 件の定義（config.json の ``watch`` エントリ）。"""
 
-    type: str  # "crypto" | "forex"
+    type: str  # "crypto" | "forex" | "hyperliquid" | "ratio"
     key: str  # 状態保存・履歴で使う一意キー
     label: str
     emoji: str
@@ -22,6 +22,14 @@ class Asset:
     # forex 用 ------------------------------------------------------------
     base: str = ""  # 基準通貨 (例: "USD")
     quote: str = ""  # 相手通貨 (例: "JPY")
+
+    # hyperliquid 用 ------------------------------------------------------
+    coin: str = ""  # Hyperliquid の銘柄シンボル (例: "HYPE", "BTC")
+    market: str = "perp"  # 現状は perp mid のみ対応
+
+    # ratio 用（2 アセット間レート）---------------------------------------
+    num: str = ""  # 分子の CoinGecko ID (例: "jpyc")
+    den: str = ""  # 分母の CoinGecko ID (例: "usd-coin")
 
 
 @dataclass

@@ -30,6 +30,7 @@ DEFAULT_WEB_PORT = 8787
 DEFAULT_WATCH: list[dict] = [
     {"type": "crypto", "id": "bitcoin", "label": "Bitcoin (BTC)", "emoji": "🟡", "vs": ["usd", "jpy"]},
     {"type": "crypto", "id": "ethereum", "label": "Ethereum (ETH)", "emoji": "🔷", "vs": ["usd", "jpy"]},
+    {"type": "hyperliquid", "coin": "HYPE", "label": "HYPE (Hyperliquid)", "emoji": "⚡"},
     {"type": "forex", "base": "USD", "quote": "JPY", "label": "ドル円 (USD/JPY)", "emoji": "💴", "threshold": 2},
 ]
 
@@ -104,7 +105,46 @@ def _parse_asset(raw: dict, index: int, default_threshold: float) -> Asset:
             quote=quote,
         )
 
-    raise ConfigError(f"watch[{index}] の type '{atype}' は未対応です (crypto / forex)")
+    if atype == "hyperliquid":
+        coin = str(raw.get("coin", "")).strip().upper()
+        if not coin:
+            raise ConfigError(f"watch[{index}] (hyperliquid) には 'coin' が必要です（例: HYPE, BTC）")
+        market = str(raw.get("market", "perp")).strip().lower()
+        label = str(raw.get("label") or f"{coin} (Hyperliquid)")
+        return Asset(
+            type="hyperliquid",
+            key=raw.get("key") or f"hl:{coin}",
+            label=label,
+            emoji=str(raw.get("emoji", "⚡")),
+            threshold=threshold,
+            coin=coin,
+            market=market,
+        )
+
+    if atype == "ratio":
+        num = str(raw.get("num", "")).strip().lower()
+        den = str(raw.get("den", "")).strip().lower()
+        # "pair": "jpyc/usd-coin" 形式も許可。
+        if not num and not den and raw.get("pair"):
+            parts = str(raw["pair"]).split("/")
+            if len(parts) == 2:
+                num, den = parts[0].strip().lower(), parts[1].strip().lower()
+        if not num or not den:
+            raise ConfigError(f"watch[{index}] (ratio) には 'num' と 'den'（CoinGecko ID）が必要です")
+        label = str(raw.get("label") or f"{num.upper()}/{den.upper()}")
+        return Asset(
+            type="ratio",
+            key=raw.get("key") or f"ratio:{num}/{den}",
+            label=label,
+            emoji=str(raw.get("emoji", "🪙")),
+            threshold=threshold,
+            num=num,
+            den=den,
+        )
+
+    raise ConfigError(
+        f"watch[{index}] の type '{atype}' は未対応です (crypto / forex / hyperliquid / ratio)"
+    )
 
 
 def parse_config(raw: dict) -> Config:

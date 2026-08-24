@@ -74,6 +74,8 @@
           <div class="add-row">
             <button id="add-crypto" class="btn ghost">＋ 暗号資産</button>
             <button id="add-forex" class="btn ghost">＋ 為替</button>
+            <button id="add-hyperliquid" class="btn ghost">＋ Hyperliquid</button>
+            <button id="add-ratio" class="btn ghost">＋ レート(比)</button>
           </div>
         </fieldset>
       </div>
@@ -103,6 +105,27 @@
       <input class="w-emoji" placeholder="💱" maxlength="4" />
       <input class="w-base" placeholder="USD" />
       <input class="w-quote" placeholder="JPY" />
+      <input class="w-label" placeholder="表示名" />
+      <input class="w-threshold" type="number" step="0.1" placeholder="閾値%" />
+      <button class="btn ghost w-del" title="削除">🗑</button>
+    </div>
+  </template>
+  <template id="tpl-hyperliquid">
+    <div class="watch-item" data-type="hyperliquid">
+      <span class="badge hyperliquid">HL</span>
+      <input class="w-emoji" placeholder="⚡" maxlength="4" />
+      <input class="w-coin" placeholder="HYPE / BTC (perp)" />
+      <input class="w-label" placeholder="表示名" />
+      <input class="w-threshold" type="number" step="0.1" placeholder="閾値%" />
+      <button class="btn ghost w-del" title="削除">🗑</button>
+    </div>
+  </template>
+  <template id="tpl-ratio">
+    <div class="watch-item" data-type="ratio">
+      <span class="badge ratio">rate</span>
+      <input class="w-emoji" placeholder="🪙" maxlength="4" />
+      <input class="w-num" placeholder="jpyc (CoinGecko ID)" />
+      <input class="w-den" placeholder="usd-coin (CoinGecko ID)" />
       <input class="w-label" placeholder="表示名" />
       <input class="w-threshold" type="number" step="0.1" placeholder="閾値%" />
       <button class="btn ghost w-del" title="削除">🗑</button>
