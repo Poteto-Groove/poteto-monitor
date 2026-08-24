@@ -15,7 +15,15 @@
     { "type": "crypto", "id": "ethereum", "label": "Ethereum (ETH)", "emoji": "🔷", "vs": ["usd", "jpy"] },
     { "type": "crypto", "id": "solana",   "label": "Solana (SOL)",   "emoji": "🌞", "vs": ["usd", "jpy"], "threshold": 15 },
 
+    { "type": "crypto", "id": "usd-coin", "label": "USDC", "emoji": "💵", "vs": ["usd", "jpy"], "threshold": 1 },
+    { "type": "crypto", "id": "jpyc",     "label": "JPYC", "emoji": "🇯🇵", "vs": ["jpy", "usd"], "threshold": 1 },
+
+    { "type": "hyperliquid", "coin": "HYPE", "label": "HYPE (Hyperliquid)", "emoji": "⚡" },
+    { "type": "hyperliquid", "coin": "BTC",  "label": "BTC perp (Hyperliquid)", "emoji": "🟠", "threshold": 5 },
+
     { "type": "forex", "base": "USD", "quote": "JPY", "label": "ドル円 (USD/JPY)", "emoji": "💴", "threshold": 2 },
-    { "type": "forex", "base": "EUR", "quote": "JPY", "label": "ユーロ円 (EUR/JPY)", "emoji": "💶", "threshold": 2 }
+    { "type": "forex", "base": "EUR", "quote": "JPY", "label": "ユーロ円 (EUR/JPY)", "emoji": "💶", "threshold": 2 },
+
+    { "type": "ratio", "num": "jpyc", "den": "usd-coin", "label": "JPYC/USDC", "emoji": "🪙", "threshold": 2 }
   ]
 }

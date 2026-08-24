@@ -116,6 +116,8 @@ main { max-width: 1160px; margin: 0 auto; padding: 28px 24px 64px; }
 }
 .badge.crypto { color: #ffd479; border-color: #6b5a2a; }
 .badge.forex { color: #8fd3ff; border-color: #2a5a6b; }
+.badge.hyperliquid { color: #7ff0d0; border-color: #2a6b5a; }
+.badge.ratio { color: #d3b8ff; border-color: #4a3a6b; }
 .card-price { font-size: 26px; font-weight: 750; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
 .card-change { font-size: 14px; font-weight: 650; display: inline-flex; align-items: center; gap: 6px; }
 .up { color: var(--up); }

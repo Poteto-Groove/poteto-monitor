@@ -27,9 +27,11 @@ Discord 通知で見守る、軽量なセルフホスト・モニターです。
 | ⚙️ **UI から全部いじれる** | 銘柄の追加/削除・閾値・更新間隔・基準通貨をブラウザで編集 → **再起動なしで即反映** |
 | 🪙 **暗号資産** | CoinGecko の任意銘柄を USD / JPY など複数通貨で表示 |
 | 💱 **為替レート** | ドル円・ユーロ円など任意の法定通貨ペア（**API キー不要**） |
+| ⚡ **Hyperliquid** | `HYPE` や BTC/ETH などの **perp 板中値 (mid)** を監視（**API キー不要**） |
+| 🪙 **ステーブル & レート比** | USDC / JPYC などのステーブルコイン、`ratio` 型で **JPYC/USDC** の比も算出 |
 | 🚨 **アセット別アラート** | 「暗号資産は 10%、為替は 2%」のように個別閾値。Discord へ即通知 |
 | ☁️ **Cloudflare Tunnel 対応** | ローカル待受 + トンネルで、ポート開放なしに外から安全に閲覧 |
-| 🧩 **設定ファイル駆動** | すべて `config.json`。コードに触れず運用できる |
+| 🧩 **プラグイン式プロバイダ** | 種別ごとの取得関数を **レジストリに 1 行登録**するだけ。新データソースを見越した拡張構造 |
 
 > **v2 → 現在** — 毎時バッチ（COBOL 的な放置運用😅）から、**常駐デーモン + ライブ UI** へ刷新。
 > 旧 `python monitor.py` / 毎時タイマー運用も互換で残しています。
@@ -64,8 +66,9 @@ flowchart LR
         C[("config.json")] -. hot reload .-> P
         W -->|保存| C
     end
-    CG["CoinGecko API"] --> P
-    FX["open.er-api.com"] --> P
+    CG["CoinGecko API<br/>crypto · ratio"] --> P
+    FX["open.er-api.com<br/>forex"] --> P
+    HL["api.hyperliquid.xyz<br/>hyperliquid"] --> P
     W <-->|HTTPS| CFT["Cloudflare Tunnel"] <--> U["ブラウザ / スマホ"]
 ```
 
@@ -73,7 +76,7 @@ flowchart LR
 poteto-monitor/
 ├── poteto_monitor/
 │   ├── config.py          # 設定の読み込み・検証・生 JSON 入出力
-│   ├── providers.py       # 取得（crypto=CoinGecko / forex=open.er-api.com）
+│   ├── providers.py       # 取得プロバイダのレジストリ（crypto / forex / hyperliquid / ratio）
 │   ├── notify.py          # Discord embed 生成・送信
 │   ├── format.py          # 通貨・レート・変化率の整形
 │   ├── storage.py         # prices.json / history.json（アトミック保存）
@@ -179,8 +182,44 @@ cloudflared tunnel run poteto        # 常用は systemd 化推奨
 | `base` / `quote` | ✅ | 通貨ペア（`USD` / `JPY`）。`"pair": "USD/JPY"` 形式も可 |
 | `label` / `emoji` / `threshold` | | 表示名・絵文字・個別閾値 |
 
-> 銘柄 ID は CoinGecko [`/coins/list`](https://api.coingecko.com/api/v3/coins/list) で確認。
-> 為替は [open.er-api.com](https://www.exchangerate-api.com/docs/free)（キー不要）を使用。
+**`watch` — Hyperliquid (`type: "hyperliquid"`)**
+
+| キー | 必須 | 説明 |
+|---|---|---|
+| `coin` | ✅ | Hyperliquid の銘柄シンボル（`HYPE`, `BTC`, `ETH`, `SOL` …）。**perp 板中値 (mid, USD 建て)** |
+| `label` / `emoji` / `threshold` | | 表示名・絵文字・個別閾値 |
+
+```json
+{ "type": "hyperliquid", "coin": "HYPE", "label": "HYPE", "emoji": "⚡" }
+```
+
+**`watch` — レート比 (`type: "ratio"`)**
+
+2 銘柄の価格比を算出します。ステーブルコイン同士（`JPYC/USDC`）や、任意の相対強弱（`HYPE/BTC` 等）に。
+
+| キー | 必須 | 説明 |
+|---|---|---|
+| `num` / `den` | ✅ | 分子 / 分母の CoinGecko ID。`"pair": "jpyc/usd-coin"` 形式も可。値 = `price(num)/price(den)` |
+| `label` / `emoji` / `threshold` | | 表示名・絵文字・個別閾値 |
+
+```json
+{ "type": "ratio", "num": "jpyc", "den": "usd-coin", "label": "JPYC/USDC", "emoji": "🪙" }
+```
+
+> 銘柄 ID は CoinGecko [`/coins/list`](https://api.coingecko.com/api/v3/coins/list) で確認（例: `usd-coin`, `jpyc`）。
+> 為替は [open.er-api.com](https://www.exchangerate-api.com/docs/free)、Hyperliquid は [公開 info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api)（いずれもキー不要）。
+
+### 🧩 新しいデータソースを足す
+
+プロバイダは `poteto_monitor/providers.py` の `PROVIDERS` レジストリに登録された関数です。
+新しいソース（別の DEX、株価 API など）を足すには、同じシグネチャの関数を書いて 1 行登録するだけ:
+
+```python
+def fetch_mydex(assets, base_currency, *, session=None) -> list[Reading]:
+    ...  # 取得して Reading を返す
+
+PROVIDERS["mydex"] = fetch_mydex   # これで config の {"type": "mydex", ...} が有効に
+```
 
 ### 環境変数での上書き
 
