@@ -273,6 +273,6 @@ poteto-monitor --dry-run     # 1 回だけ取得して表示
 今回はそれを掘り起こし、**通貨を自由に足せて・ドル円などの為替も見られて・ブラウザでリアルタイムに眺められる**
 ように作り直しました。スタックも README もモダンに。
 
-- 皆様と自分の幸運を祈っております 🥔
+- 皆様と自分たちの幸運を祈っております 🥔
 
 <div align="center"><sub>MIT License · Made for a small community that just wanted to watch the charts together.</sub></div>
