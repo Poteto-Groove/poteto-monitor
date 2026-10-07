@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 CURRENCY_SYMBOLS = {
     "usd": "$",
     "jpy": "¥",
@@ -27,8 +29,9 @@ def money(value: float, currency: str) -> str:
     if code in ZERO_DECIMAL:
         body = f"{value:,.0f}"
     elif abs(value) != 0 and abs(value) < 1:
-        # 端数の細かい暗号資産などは有効桁を確保する。
-        body = f"{value:,.6f}".rstrip("0").rstrip(".")
+        # 端数の細かい暗号資産などは有効桁（4 桁）を確保する。
+        decimals = -math.floor(math.log10(abs(value))) + 3
+        body = f"{value:,.{decimals}f}".rstrip("0").rstrip(".")
     else:
         body = f"{value:,.2f}"
 

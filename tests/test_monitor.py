@@ -15,6 +15,9 @@ from poteto_monitor.models import Reading
 
 
 class FakeResp:
+    status_code = 200
+    headers: dict = {}
+
     def __init__(self, payload):
         self._payload = payload
 
@@ -28,7 +31,7 @@ class FakeResp:
 class FakeSession:
     """URL に応じて CoinGecko / forex / hyperliquid のレスポンスを返すスタブ。"""
 
-    def get(self, url, params=None, timeout=None):
+    def get(self, url, params=None, headers=None, timeout=None):
         if "coingecko" in url:
             return FakeResp(
                 {

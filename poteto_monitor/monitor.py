@@ -23,7 +23,7 @@ log = logging.getLogger("poteto-monitor")
 
 def run(cfg: Config, *, dry_run: bool = False) -> int:
     log.info("監視対象 %d 件を取得中...", len(cfg.assets))
-    readings = fetch_all(cfg.assets, cfg.base_currency)
+    readings = fetch_all(cfg.assets, cfg.base_currency, coingecko_api_key=cfg.coingecko_api_key)
 
     now = datetime.now(timezone.utc)
     now_str = now.strftime("%Y-%m-%d %H:%M")
@@ -48,7 +48,7 @@ def run(cfg: Config, *, dry_run: bool = False) -> int:
     # 前回価格を更新（次回の変化率計算用）。
     save_json(
         PRICES_FILE,
-        {"last_updated": now.isoformat(), "values": {r.key: r.value for r in readings}},
+        {"last_updated": now.isoformat(), "base_currency": cfg.base_currency, "values": {r.key: r.value for r in readings}},
     )
 
     # 履歴を追記（末尾 history_limit 件を保持）。
@@ -78,7 +78,8 @@ def serve(cfg: Config) -> int:
     log.info("Web ダッシュボードを起動: http://%s:%d", cfg.web_host, cfg.web_port)
     if not cfg.web_auth_token:
         log.warning("web.auth_token 未設定です。公開する場合は Cloudflare Access 等で保護してください。")
-    uvicorn.run(app, host=cfg.web_host, port=cfg.web_port, log_level="info")
+    # SSE 接続が残っていても停止できるよう、終了待ちに上限を設ける。
+    uvicorn.run(app, host=cfg.web_host, port=cfg.web_port, log_level="info", timeout_graceful_shutdown=3)
     return 0
 
 

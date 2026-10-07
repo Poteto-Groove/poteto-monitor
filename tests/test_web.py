@@ -9,18 +9,22 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from poteto_monitor import config as config_mod  # noqa: E402
 from poteto_monitor.models import Reading  # noqa: E402
+from poteto_monitor.providers import SUPPORTED_TYPES, Source, SourceResult  # noqa: E402
 from poteto_monitor.web import poller as poller_mod  # noqa: E402
 from poteto_monitor.web import server as server_mod  # noqa: E402
 
 
-def _fake_readings(assets, base_currency, session=None):
+def _fake_readings(assets, base_currency, session=None, api_key=""):
     out = []
     for a in assets:
         out.append(
             Reading(key=a.key, label=a.label, emoji=a.emoji, value=123.0,
                     display="123", threshold=a.threshold, type=a.type)
         )
-    return out
+    return SourceResult(readings=out)
+
+
+FAKE_SOURCES = {"fake": Source(types=SUPPORTED_TYPES, fetch=_fake_readings)}
 
 
 @pytest.fixture
@@ -29,8 +33,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "CONFIG_FILE", cfg_file)
     monkeypatch.setattr(poller_mod, "PRICES_FILE", tmp_path / "prices.json")
     monkeypatch.setattr(poller_mod, "HISTORY_FILE", tmp_path / "history.json")
-    # ポーラーがネットワークに出ないようスタブ化。
-    monkeypatch.setattr(poller_mod, "fetch_all", _fake_readings)
 
     cfg_file.write_text(
         '{"webhook_url":"","poll_interval":300,"report_interval":0,'
@@ -40,6 +42,7 @@ def client(tmp_path, monkeypatch):
     from poteto_monitor.web.context import AppContext
 
     ctx = AppContext(config_mod.load_config())
+    ctx.fetcher.sources = FAKE_SOURCES  # ポーラーがネットワークに出ないようスタブ化。
     app = server_mod.create_app(ctx)
     with TestClient(app) as c:
         yield c

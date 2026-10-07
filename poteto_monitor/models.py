@@ -44,3 +44,4 @@ class Reading:
     threshold: float
     type: str = ""  # "crypto" | "forex"
     fields: dict[str, float] = field(default_factory=dict)  # 履歴保存用の生値
+    as_of: str | None = None  # 上流データの時刻（ISO 8601, 分かる場合のみ）
