@@ -125,6 +125,10 @@ main { max-width: 1160px; margin: 0 auto; padding: 28px 24px 64px; }
 .flat { color: var(--flat); }
 .card-foot { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .spark { width: 100%; height: 40px; display: block; }
+.card-asof { color: var(--muted); font-size: 12px; min-height: 1em; }
+.card-asof:empty { display: none; }
+.card.stale .card-price { opacity: .55; }
+.card.stale .card-asof { color: var(--down); }
 
 /* ── Drawer ──────────────────────────────────────────── */
 .drawer { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }

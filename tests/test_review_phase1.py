@@ -101,26 +101,32 @@ def test_base_currency_change_drops_only_base_dependent_previous():
 
 def test_poller_no_false_alert_after_base_currency_change(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
+    from poteto_monitor.providers import Source, SourceResult
     from poteto_monitor.web import poller as poller_mod
     from poteto_monitor.web.context import AppContext
 
     prices = {"usd": 100.0, "jpy": 15000.0}
 
-    def fake_fetch(assets, base_currency, session=None):
-        return [_reading(a.key, prices[base_currency]) for a in assets]
+    def fake_fetch(assets, base_currency, session=None, api_key=""):
+        return SourceResult(readings=[_reading(a.key, prices[base_currency]) for a in assets])
 
     sent: list = []
-    monkeypatch.setattr(poller_mod, "fetch_all", fake_fetch)
     monkeypatch.setattr(poller_mod, "send", lambda url, embeds: sent.append(embeds))
     monkeypatch.setattr(poller_mod, "PRICES_FILE", tmp_path / "prices.json")
     monkeypatch.setattr(poller_mod, "HISTORY_FILE", tmp_path / "history.json")
 
     raw = {"webhook_url": "https://discord.com/api/webhooks/x/y", "report_interval": 0,
            "watch": [{"type": "crypto", "id": "bitcoin"}]}
-    ctx = AppContext(parse_config(raw))
-    asyncio.run(poller_mod._tick(ctx, None))
-    ctx.config = parse_config({**raw, "base_currency": "jpy"})
-    asyncio.run(poller_mod._tick(ctx, None))
+
+    async def scenario():
+        ctx = AppContext(parse_config(raw))
+        ctx.fetcher.sources = {"fake": Source(types=("crypto",), fetch=fake_fetch)}
+        await poller_mod._tick(ctx, None)
+        ctx.config = parse_config({**raw, "base_currency": "jpy"})
+        await poller_mod._tick(ctx, None)
+        await ctx.close()
+
+    asyncio.run(scenario())
     assert sent == []
 
 

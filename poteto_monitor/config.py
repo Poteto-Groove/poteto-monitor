@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import Asset
@@ -23,6 +23,9 @@ DEFAULT_HISTORY_LIMIT = 168  # 7 日分（毎時実行時）
 DEFAULT_POLL_INTERVAL = 60  # 秒。Web ダッシュボードの更新間隔
 MIN_POLL_INTERVAL = 5  # API のレート制限を守るための下限
 DEFAULT_REPORT_INTERVAL = 3600  # 秒。Discord 定期レポートの間隔
+# 秒。データソースごとの最短取得間隔（常駐モード）。0 なら毎回の poll で取得する。
+# forex は上流が次回更新時刻を返すときはそれまで待つ（この値は下限として使う）。
+DEFAULT_INTERVALS: dict[str, int] = {"coingecko": 300, "forex": 3600, "hyperliquid": 0}
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = 8787
 
@@ -51,6 +54,8 @@ class Config:
     web_host: str = DEFAULT_WEB_HOST
     web_port: int = DEFAULT_WEB_PORT
     web_auth_token: str = ""
+    intervals: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_INTERVALS))
+    coingecko_api_key: str = ""  # Demo キー。環境変数 COINGECKO_API_KEY からのみ読む
 
 
 def _as_bool(value) -> bool:
@@ -195,6 +200,18 @@ def parse_config(raw: dict) -> Config:
         # history[-0:] は全件になるため 0 以下は受け付けない。
         raise ConfigError("'history_limit' は 1 以上である必要があります")
 
+    raw_intervals = raw.get("intervals", {})
+    if not isinstance(raw_intervals, dict):
+        raise ConfigError("'intervals' はオブジェクトである必要があります")
+    unknown = set(raw_intervals) - set(DEFAULT_INTERVALS)
+    if unknown:
+        raise ConfigError(f"'intervals' のキーが不明です: {', '.join(sorted(unknown))}")
+    intervals = dict(DEFAULT_INTERVALS)
+    for name, value in raw_intervals.items():
+        intervals[name] = _to_int(value, f"intervals.{name}")
+        if intervals[name] < 0:
+            raise ConfigError(f"'intervals.{name}' は 0 以上である必要があります")
+
     return Config(
         webhook_url=os.environ.get("DISCORD_WEBHOOK_URL") or raw.get("webhook_url", ""),
         alert_threshold=default_threshold,
@@ -206,6 +223,8 @@ def parse_config(raw: dict) -> Config:
         web_host=str(os.environ.get("WEB_HOST") or web.get("host", DEFAULT_WEB_HOST)),
         web_port=_to_int(os.environ.get("WEB_PORT") or web.get("port", DEFAULT_WEB_PORT), "web.port"),
         web_auth_token=str(os.environ.get("WEB_AUTH_TOKEN") or web.get("auth_token", "")),
+        intervals=intervals,
+        coingecko_api_key=os.environ.get("COINGECKO_API_KEY", "").strip(),
     )
 
 

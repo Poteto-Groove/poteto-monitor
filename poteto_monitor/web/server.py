@@ -56,6 +56,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
                 await task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+            await ctx.close()
 
     app = FastAPI(title="poteto-monitor", lifespan=lifespan)
     app.state.ctx = ctx

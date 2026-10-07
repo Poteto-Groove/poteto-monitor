@@ -161,6 +161,7 @@ cloudflared tunnel run poteto        # 常用は systemd 化推奨
 | `alert_threshold` | `10` | 既定のアラート閾値（%）。アセット側で上書き可 |
 | `base_currency` | `"usd"` | 変化率の基準通貨 |
 | `poll_interval` | `60` | 取得間隔（秒, 最小 5）。**UI の更新頻度**に直結 |
+| `intervals` | `{"coingecko": 300, "forex": 3600, "hyperliquid": 0}` | 常駐モードでのデータソースごとの最短取得間隔（秒）。`0` は毎回の poll で取得。為替は上流の次回更新時刻（1 日 1 回）まで再取得しません |
 | `report_interval` | `3600` | Discord 定期レポート間隔（秒, `0` で無効） |
 | `history_limit` | `168` | `history.json` に残す件数 |
 | `web.host` / `web.port` | `127.0.0.1` / `8787` | ダッシュボードの待受 |
@@ -211,20 +212,29 @@ cloudflared tunnel run poteto        # 常用は systemd 化推奨
 
 ### 🧩 新しいデータソースを足す
 
-プロバイダは `poteto_monitor/providers.py` の `PROVIDERS` レジストリに登録された関数です。
+データソースは `poteto_monitor/providers.py` の `SOURCES` レジストリに登録された関数です。
+1 つのソースは複数の `type` を受け持てます（CoinGecko は `crypto` と `ratio` を 1 リクエストで取得）。
 新しいソース（別の DEX、株価 API など）を足すには、同じシグネチャの関数を書いて 1 行登録するだけ:
 
 ```python
-def fetch_mydex(assets, base_currency, *, session=None) -> list[Reading]:
-    ...  # 取得して Reading を返す
+def fetch_mydex(assets, base_currency, *, session=None, api_key="") -> SourceResult:
+    ...  # 取得して SourceResult(readings=[...], errors={key: 理由}) を返す
 
-PROVIDERS["mydex"] = fetch_mydex   # これで config の {"type": "mydex", ...} が有効に
+SOURCES["mydex"] = Source(types=("mydex",), fetch=fetch_mydex)  # config の {"type": "mydex", ...} が有効に
 ```
+
+銘柄単位の失敗（ID の打ち間違いなど）は `errors` に入れて返し、リクエスト自体の失敗だけを例外にします。
+常駐モードではソースごとに失敗が切り分けられ、取得できない銘柄は前回の値を「取得失敗」と分かる表示で残します。
 
 ### 環境変数での上書き
 
 `DISCORD_WEBHOOK_URL` / `ALERT_THRESHOLD` / `BASE_CURRENCY` / `POLL_INTERVAL` /
 `WEB_HOST` / `WEB_PORT` / `WEB_AUTH_TOKEN` / `POTETO_DATA_DIR`
+
+`COINGECKO_API_KEY` を設定すると CoinGecko の [Demo キー](https://www.coingecko.com/en/api/pricing)
+（`x-cg-demo-api-key`）を使います。キーは環境変数からのみ読み込み、`config.json` や UI には保存しません。
+systemd で使う場合は `systemctl edit poteto-monitor-web` で `Environment=` を追加するか、
+`EnvironmentFile=` で権限 600 のファイルを指定してください。
 
 ---
 
@@ -259,9 +269,18 @@ poteto-monitor --dry-run     # 1 回だけ取得して表示
 ## ⚠️ 「リアルタイム」について
 
 ブラウザ側は SSE で**サーバーが新しい値を得た瞬間に**更新されます（描画の遅延なし）。
-一方でデータ自体の鮮度は上流 API（CoinGecko / 為替）の更新頻度とレート制限に依存します。
-`poll_interval` を短くするほど追随しますが、無料 API のレート制限に注意してください
-（最小 5 秒。CoinGecko 無料枠は概ね毎分数十リクエストが目安）。
+一方でデータ自体の鮮度は上流 API の更新頻度とレート制限に依存するため、
+常駐モードではデータソースごとに取得間隔（`intervals`）を分けています。
+
+| ソース | 既定の間隔 | 理由 |
+|---|---|---|
+| Hyperliquid | 毎回の poll | 公開 API の上限が十分大きい（REST 合計で毎分 1,200 の重み、`allMids` は 2） |
+| CoinGecko | 300 秒 | キーなしは毎分 10〜30 回程度で変動。Demo キーも月 10,000 回までのため、約 260 秒以上の間隔が必要 |
+| 為替 | 上流の次回更新まで | open.er-api.com は 1 日 1 回更新。制限超過時は 429 が 20 分続く |
+
+「今すぐ更新」ボタンもこの間隔を超えては取得しません（10 秒に 1 回まで）。
+BTC / ETH などを高頻度で見たい場合は `type: "hyperliquid"` を使うのがおすすめです
+（perp の板中値なので、現物価格とは少しずれます）。
 
 ---
 

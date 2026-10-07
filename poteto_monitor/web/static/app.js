@@ -49,6 +49,9 @@ function render(snap) {
   if (snap.status === "error") {
     setConn("err", "取得エラー");
     showBanner("取得に失敗しています: " + (snap.error || "不明なエラー"), true);
+  } else if (snap.status === "degraded") {
+    setConn("ok", "ライブ接続中（一部取得失敗）");
+    showBanner("一部の銘柄を取得できていません（前回の値を表示中）: " + (snap.error || ""), false);
   } else {
     setConn("ok", "ライブ接続中");
     hideBanner();
@@ -85,6 +88,7 @@ function makeCard(key) {
     <div class="card-price"></div>
     <div class="card-change"></div>
     <canvas class="spark" width="260" height="40"></canvas>
+    <div class="card-asof"></div>
     <div class="card-foot"><span class="thr"></span><span class="key"></span></div>`;
   return el;
 }
@@ -105,6 +109,13 @@ function updateCard(el, a) {
     const arrow = a.change_pct === 0 ? "➡" : up ? "▲" : "▼";
     ch.textContent = `${arrow} ${up ? "+" : ""}${a.change_pct.toFixed(2)}%`;
   }
+  // データ時刻: 為替は日次更新、取得失敗中は前回の値であることを明示する。
+  const notes = [];
+  if (a.stale) notes.push("⚠ 取得失敗・前回の値");
+  if (a.type === "forex") notes.push("日次レート");
+  if (a.as_of) notes.push("データ時刻 " + new Date(a.as_of).toLocaleString());
+  el.querySelector(".card-asof").textContent = notes.join(" · ");
+  el.classList.toggle("stale", !!a.stale);
   el.querySelector(".thr").textContent = "閾値 " + a.threshold + "%";
   el.querySelector(".key").textContent = a.key;
 
