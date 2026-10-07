@@ -142,8 +142,9 @@ sudo cloudflared service install "$(sudo cat /etc/cloudflared/token)"
 
 - トークン未設定のときは **読み取り専用** です（設定の保存・「今すぐ更新」は 403）。
 - `web.protect_read`（既定 `true`）が `true` だと、閲覧（価格・チャート・SSE）にもトークンが必要です。Cloudflare Access で閲覧者を絞っている場合は `false` にすると、友人にはトークンを渡さずに見てもらえます。
-- 認証の失敗が 10 分間に 10 回続くと、しばらく 429 を返します。
-- Webhook は UI からは `https://discord.com/api/webhooks/...` しか設定できず、待ち受けアドレス・ポートは UI から変更できません。
+- 同じ送信元からの認証失敗が 10 分間に 10 回続くと、その送信元にはしばらく 429 を返します（Cloudflare 経由では `CF-Connecting-IP` で区別）。
+- ログインのセッションはサーバー側で管理します。ログアウトやトークン変更で即座に無効になり、サービスを再起動すると再ログインが必要です。
+- Webhook は UI からは `https://discord.com/api/webhooks/<ID>/<トークン>` の形しか設定できず、待ち受けアドレス・ポートは UI から変更できません。
 - `/healthz` は外部監視用に認証なしで公開されます（返すのは各データソースの成否だけ）。Access の内側に置く場合は、
   Uptime Kuma 側で [サービストークン](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) の
   `CF-Access-Client-Id` / `CF-Access-Client-Secret` ヘッダーを付けて監視します。

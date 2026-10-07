@@ -65,7 +65,7 @@ def test_state_endpoint(client):
 
 def test_config_masks_secrets(client, tmp_path):
     # webhook を設定して、GET では伏せられることを確認。
-    r = client.put("/api/config", json={"webhook_url": "https://discord.com/api/webhooks/x/y"})
+    r = client.put("/api/config", json={"webhook_url": "https://discord.com/api/webhooks/123/abc"})
     assert r.status_code == 200
     got = client.get("/api/config").json()
     assert got["webhook_configured"] is True

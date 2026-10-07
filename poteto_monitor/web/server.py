@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import ConfigError, load_config, masked_view, merge_incoming, read_raw, write_raw
 from ..history import sample_base
-from .auth import COOKIE_NAME, SESSION_TTL, is_https, make_session, session_valid, token_matches
+from .auth import COOKIE_NAME, SESSION_TTL, client_key, is_https, token_matches
 from .context import AppContext
 from .poller import poll_loop
 
@@ -44,18 +44,19 @@ def _auth_dependencies(ctx: AppContext):
       公開時の保護は Cloudflare Access 等に委ねる。
     - トークン設定済み: 書き込みは常に認証必須。閲覧は web.protect_read が true なら認証必須。
     """
-    limiter = ctx.auth_limiter
+    limiter, sessions = ctx.auth_limiter, ctx.sessions
 
     def authenticated(request: Request, token: str) -> bool:
-        if session_valid(token, request.cookies.get(COOKIE_NAME)):
+        if sessions.valid(token, request.cookies.get(COOKIE_NAME)):
             return True
         supplied = request.headers.get("x-auth-token")
         if supplied is None:
             return False
-        limiter.check()
+        key = client_key(request)
+        limiter.check(key)
         if token_matches(token, supplied):
             return True
-        limiter.record_failure()
+        limiter.record_failure(key)
         return False
 
     async def read(request: Request) -> None:
@@ -115,7 +116,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         return {
             "configured": bool(token),
             "protect_read": bool(token) and ctx.config.web_protect_read,
-            "authenticated": session_valid(token, request.cookies.get(COOKIE_NAME)),
+            "authenticated": ctx.sessions.valid(token, request.cookies.get(COOKIE_NAME)),
         }
 
     @app.post("/api/login")
@@ -123,19 +124,21 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         token = ctx.config.web_auth_token
         if not token:
             raise HTTPException(status_code=403, detail="web.auth_token が未設定です")
-        ctx.auth_limiter.check()
+        key = client_key(request)
+        ctx.auth_limiter.check(key)
         if not token_matches(token, str(payload.get("token", ""))):
-            ctx.auth_limiter.record_failure()
-            log.warning("ログイン失敗（%s）", request.headers.get("cf-connecting-ip") or request.client)
+            ctx.auth_limiter.record_failure(key)
+            log.warning("ログイン失敗（%s）", key)
             raise HTTPException(status_code=401, detail="トークンが違います")
         response.set_cookie(
-            COOKIE_NAME, make_session(token), max_age=SESSION_TTL, httponly=True,
+            COOKIE_NAME, ctx.sessions.issue(token), max_age=SESSION_TTL, httponly=True,
             samesite="strict", secure=is_https(request), path="/",
         )
         return {"ok": True}
 
     @app.post("/api/logout")
-    async def logout(response: Response) -> dict:
+    async def logout(request: Request, response: Response) -> dict:
+        ctx.sessions.revoke(request.cookies.get(COOKIE_NAME))  # Cookie が漏れていても使えなくする
         response.delete_cookie(COOKIE_NAME, path="/")
         return {"ok": True}
 
