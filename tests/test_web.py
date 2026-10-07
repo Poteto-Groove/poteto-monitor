@@ -32,7 +32,6 @@ def client(tmp_path, monkeypatch):
     cfg_file = tmp_path / "config.json"
     monkeypatch.setattr(config_mod, "CONFIG_FILE", cfg_file)
     monkeypatch.setattr(poller_mod, "PRICES_FILE", tmp_path / "prices.json")
-    monkeypatch.setattr(poller_mod, "HISTORY_FILE", tmp_path / "history.json")
 
     cfg_file.write_text(
         '{"webhook_url":"","poll_interval":300,"report_interval":0,'

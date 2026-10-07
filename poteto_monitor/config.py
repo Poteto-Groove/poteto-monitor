@@ -16,10 +16,14 @@ from .models import Asset
 DATA_DIR = Path(os.environ.get("POTETO_DATA_DIR", "/var/lib/poteto-monitor"))
 CONFIG_FILE = DATA_DIR / "config.json"
 PRICES_FILE = DATA_DIR / "prices.json"
-HISTORY_FILE = DATA_DIR / "history.json"
+HISTORY_FILE = DATA_DIR / "history.json"  # 旧形式（import-history の既定の取り込み元）
+HISTORY_DB = DATA_DIR / "history.db"
 
 DEFAULT_THRESHOLD = 10.0
-DEFAULT_HISTORY_LIMIT = 168  # 7 日分（毎時実行時）
+DEFAULT_RETENTION_DAYS = 30  # 履歴 DB に残す日数
+DEFAULT_ALERT_WINDOW = 3600  # 秒。急変アラートは「この秒数前の値」と比べる
+MIN_ALERT_WINDOW = 60
+DEFAULT_ALERT_COOLDOWN = 3600  # 秒。同じ銘柄のアラートを再送しない時間
 DEFAULT_POLL_INTERVAL = 60  # 秒。Web ダッシュボードの更新間隔
 MIN_POLL_INTERVAL = 5  # API のレート制限を守るための下限
 DEFAULT_REPORT_INTERVAL = 3600  # 秒。Discord 定期レポートの間隔
@@ -47,7 +51,6 @@ class Config:
     webhook_url: str
     alert_threshold: float
     base_currency: str
-    history_limit: int
     assets: list[Asset]
     poll_interval: int = DEFAULT_POLL_INTERVAL
     report_interval: int = DEFAULT_REPORT_INTERVAL
@@ -56,6 +59,9 @@ class Config:
     web_auth_token: str = ""
     intervals: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_INTERVALS))
     coingecko_api_key: str = ""  # Demo キー。環境変数 COINGECKO_API_KEY からのみ読む
+    retention_days: int = DEFAULT_RETENTION_DAYS
+    alert_window: int = DEFAULT_ALERT_WINDOW
+    alert_cooldown: int = DEFAULT_ALERT_COOLDOWN
 
 
 def _as_bool(value) -> bool:
@@ -195,10 +201,16 @@ def parse_config(raw: dict) -> Config:
         os.environ.get("POLL_INTERVAL") or raw.get("poll_interval", DEFAULT_POLL_INTERVAL), "poll_interval"
     )
     report_interval = _to_int(raw.get("report_interval", DEFAULT_REPORT_INTERVAL), "report_interval")
-    history_limit = _to_int(raw.get("history_limit", DEFAULT_HISTORY_LIMIT), "history_limit")
-    if history_limit < 1:
-        # history[-0:] は全件になるため 0 以下は受け付けない。
-        raise ConfigError("'history_limit' は 1 以上である必要があります")
+    # 旧設定の history_limit は履歴 DB 移行で不要になったため読み飛ばす。
+    retention_days = _to_int(raw.get("retention_days", DEFAULT_RETENTION_DAYS), "retention_days")
+    if retention_days < 1:
+        raise ConfigError("'retention_days' は 1 以上である必要があります")
+    alert_window = _to_int(raw.get("alert_window", DEFAULT_ALERT_WINDOW), "alert_window")
+    if alert_window < MIN_ALERT_WINDOW:
+        raise ConfigError(f"'alert_window' は {MIN_ALERT_WINDOW} 秒以上である必要があります")
+    alert_cooldown = _to_int(raw.get("alert_cooldown", DEFAULT_ALERT_COOLDOWN), "alert_cooldown")
+    if alert_cooldown < 0:
+        raise ConfigError("'alert_cooldown' は 0 以上である必要があります")
 
     raw_intervals = raw.get("intervals", {})
     if not isinstance(raw_intervals, dict):
@@ -216,7 +228,6 @@ def parse_config(raw: dict) -> Config:
         webhook_url=os.environ.get("DISCORD_WEBHOOK_URL") or raw.get("webhook_url", ""),
         alert_threshold=default_threshold,
         base_currency=str(os.environ.get("BASE_CURRENCY") or raw.get("base_currency", "usd")).lower(),
-        history_limit=history_limit,
         assets=assets,
         poll_interval=max(MIN_POLL_INTERVAL, poll_interval),
         report_interval=max(0, report_interval),
@@ -225,6 +236,9 @@ def parse_config(raw: dict) -> Config:
         web_auth_token=str(os.environ.get("WEB_AUTH_TOKEN") or web.get("auth_token", "")),
         intervals=intervals,
         coingecko_api_key=os.environ.get("COINGECKO_API_KEY", "").strip(),
+        retention_days=retention_days,
+        alert_window=alert_window,
+        alert_cooldown=alert_cooldown,
     )
 
 
@@ -259,7 +273,7 @@ def read_raw(path: Path | None = None) -> dict:
     raw.setdefault("watch", list(DEFAULT_WATCH))
     raw.setdefault("alert_threshold", DEFAULT_THRESHOLD)
     raw.setdefault("base_currency", "usd")
-    raw.setdefault("history_limit", DEFAULT_HISTORY_LIMIT)
+    raw.setdefault("retention_days", DEFAULT_RETENTION_DAYS)
     raw.setdefault("poll_interval", DEFAULT_POLL_INTERVAL)
     raw.setdefault("report_interval", DEFAULT_REPORT_INTERVAL)
     web = raw.get("web") if isinstance(raw.get("web"), dict) else {}
@@ -286,7 +300,10 @@ def masked_view(raw: dict) -> dict:
 def merge_incoming(existing: dict, incoming: dict) -> dict:
     """UI から来た設定を既存にマージ（空の秘匿値は現状維持）。"""
     merged = json.loads(json.dumps(existing))
-    for key in ("alert_threshold", "base_currency", "history_limit", "poll_interval", "report_interval", "watch"):
+    for key in (
+        "alert_threshold", "base_currency", "retention_days", "alert_window", "alert_cooldown",
+        "poll_interval", "report_interval", "watch",
+    ):
         if key in incoming:
             merged[key] = incoming[key]
 

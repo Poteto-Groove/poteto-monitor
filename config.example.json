@@ -2,7 +2,9 @@
   "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
   "alert_threshold": 10,
   "base_currency": "usd",
-  "history_limit": 168,
+  "retention_days": 30,
+  "alert_window": 3600,
+  "alert_cooldown": 3600,
   "poll_interval": 60,
   "report_interval": 3600,
   "web": {

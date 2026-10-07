@@ -6,9 +6,12 @@ import argparse
 import logging
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import __version__
-from .config import HISTORY_FILE, PRICES_FILE, Config, ConfigError, load_config  # noqa: F401
+from . import config as config_mod
+from .config import HISTORY_FILE, PRICES_FILE, Config, ConfigError, load_config
+from .history import HistoryStore, sample_base
 from .notify import build_alert_embed, build_report_embed, find_alerts, send
 from .providers import ProviderError, fetch_all
 from .storage import load_json, load_previous, save_json
@@ -51,14 +54,23 @@ def run(cfg: Config, *, dry_run: bool = False) -> int:
         {"last_updated": now.isoformat(), "base_currency": cfg.base_currency, "values": {r.key: r.value for r in readings}},
     )
 
-    # 履歴を追記（末尾 history_limit 件を保持）。
-    history = load_json(HISTORY_FILE, [])
-    if not isinstance(history, list):
-        history = []
-    history.append(
-        {"timestamp": now.isoformat(), "values": {r.key: r.fields or {"value": r.value} for r in readings}}
-    )
-    save_json(HISTORY_FILE, history[-cfg.history_limit :])
+    # 履歴 DB に記録（常駐モードと共通。retention_days より古い行は削除）。
+    store = HistoryStore(config_mod.HISTORY_DB)
+    ts = int(now.timestamp())
+    store.add((r.key, sample_base(r.type, cfg.base_currency), ts, r.value) for r in readings)
+    store.prune(ts - cfg.retention_days * 86400)
+    return 0
+
+
+def import_history(path: str | None) -> int:
+    """旧 history.json（v1 / v2 形式）を履歴 DB に取り込む。"""
+    src = Path(path) if path else HISTORY_FILE
+    entries = load_json(src, None)
+    if not isinstance(entries, list):
+        log.error("%s を読み込めません（JSON の配列ではないか、存在しません）", src)
+        return 1
+    added = HistoryStore(config_mod.HISTORY_DB).import_entries(entries)
+    log.info("%s から %d 件を履歴 DB (%s) に取り込みました", src, added, config_mod.HISTORY_DB)
     return 0
 
 
@@ -88,11 +100,16 @@ def main(argv: list[str] | None = None) -> int:
         prog="poteto-monitor",
         description="暗号資産と為替レートを監視して Discord へ通知します。",
     )
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "serve"],
-                        help="run: 1 回実行（既定） / serve: Web ダッシュボードを常駐起動")
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "serve", "import-history"],
+                        help="run: 1 回実行（既定） / serve: Web ダッシュボードを常駐起動 / "
+                             "import-history: 旧 history.json を履歴 DB に取り込む")
+    parser.add_argument("path", nargs="?", help="import-history の取り込み元（既定: データディレクトリの history.json）")
     parser.add_argument("--dry-run", action="store_true", help="取得・整形のみ行い、送信も保存もしない")
     parser.add_argument("--version", action="version", version=f"poteto-monitor {__version__}")
     args = parser.parse_args(argv)
+
+    if args.command == "import-history":
+        return import_history(args.path)
 
     try:
         cfg = load_config()

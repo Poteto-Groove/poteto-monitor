@@ -49,10 +49,11 @@ def test_vs_string_is_not_split_into_chars():
     assert two.vs == ("usd", "jpy")
 
 
-@pytest.mark.parametrize("limit", [0, -1])
-def test_history_limit_must_be_positive(limit):
+@pytest.mark.parametrize("days", [0, -1])
+def test_retention_days_must_be_positive(days):
+    # 段階 3 で history_limit は retention_days に置き換え（history_limit は無視される）。
     with pytest.raises(ConfigError):
-        parse_config({"history_limit": limit})
+        parse_config({"retention_days": days})
 
 
 # ── S-1: config.json のパーミッション ────────────────────────────────
@@ -113,7 +114,6 @@ def test_poller_no_false_alert_after_base_currency_change(tmp_path, monkeypatch)
     sent: list = []
     monkeypatch.setattr(poller_mod, "send", lambda url, embeds: sent.append(embeds))
     monkeypatch.setattr(poller_mod, "PRICES_FILE", tmp_path / "prices.json")
-    monkeypatch.setattr(poller_mod, "HISTORY_FILE", tmp_path / "history.json")
 
     raw = {"webhook_url": "https://discord.com/api/webhooks/x/y", "report_interval": 0,
            "watch": [{"type": "crypto", "id": "bitcoin"}]}
@@ -121,9 +121,9 @@ def test_poller_no_false_alert_after_base_currency_change(tmp_path, monkeypatch)
     async def scenario():
         ctx = AppContext(parse_config(raw))
         ctx.fetcher.sources = {"fake": Source(types=("crypto",), fetch=fake_fetch)}
-        await poller_mod._tick(ctx, None)
+        await poller_mod._tick(ctx)
         ctx.config = parse_config({**raw, "base_currency": "jpy"})
-        await poller_mod._tick(ctx, None)
+        await poller_mod._tick(ctx)
         await ctx.close()
 
     asyncio.run(scenario())

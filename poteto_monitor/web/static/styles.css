@@ -129,6 +129,20 @@ main { max-width: 1160px; margin: 0 auto; padding: 28px 24px 64px; }
 .card-asof:empty { display: none; }
 .card.stale .card-price { opacity: .55; }
 .card.stale .card-asof { color: var(--down); }
+.card { cursor: pointer; }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card-sub { color: var(--muted); font-size: 12px; font-weight: 500; margin-left: 6px; }
+
+/* ── Chart modal ─────────────────────────────────────── */
+.modal { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-panel {
+  position: relative; z-index: 1; width: min(860px, 100%); background: var(--bg-elev);
+  border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+}
+.segs { display: flex; gap: 6px; align-items: center; }
+.seg.active { border-color: var(--accent); color: var(--accent); }
+.chart-canvas { display: block; width: 100%; height: min(360px, 55vh); padding: 0 12px; box-sizing: border-box; }
+.chart-note { margin: 0; padding: 8px 20px 16px; }
 
 /* ── Drawer ──────────────────────────────────────────── */
 .drawer { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }
