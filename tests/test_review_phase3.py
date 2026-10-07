@@ -289,3 +289,28 @@ def test_import_history_cli(tmp_path):
     src.write_text(json.dumps([{"timestamp": _dt(T0).isoformat(), "bitcoin_usd": 1}]), encoding="utf-8")
     assert main(["import-history", str(src)]) == 0
     assert HistoryStore(config_mod.HISTORY_DB).value_at("crypto:bitcoin", "usd", T0, 0) == 1
+
+
+def test_concurrent_first_access_does_not_lock(tmp_path):
+    """初回アクセスが複数スレッドで重なっても database is locked にならない（WAL 化の競合）。"""
+    import threading
+
+    for n in range(20):
+        store = HistoryStore(tmp_path / f"race{n}.db")
+        errors: list[Exception] = []
+        barrier = threading.Barrier(8)
+
+        def worker(i: int) -> None:
+            try:
+                barrier.wait()
+                store.add([("k", "", T0 + i, float(i))])
+                store.value_at("k", "", T0 + 10, 100)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []

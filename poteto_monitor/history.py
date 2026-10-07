@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -42,19 +43,30 @@ class HistoryStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._ready = False
+        self._init_lock = threading.Lock()
 
-    def _connect(self) -> sqlite3.Connection:
-        if not self._ready:
+    def _init(self) -> None:
+        """ファイル作成・WAL 化・スキーマ作成を 1 回だけ行う。
+
+        WAL への切り替えは他の接続がロックを持っていると待たずに "database is locked" で失敗するため、
+        ポーラーと API のスレッドが同時に初回アクセスしても 1 つだけが実行するようロックを取る。
+        """
+        with self._init_lock:
+            if self._ready:
+                return
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if not self.path.exists():
                 # 他ユーザーから読めないよう 600 で作る。
                 os.close(os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600))
-        conn = sqlite3.connect(self.path, timeout=10)
-        if not self._ready:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(SCHEMA)
+            with closing(sqlite3.connect(self.path, timeout=10)) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.executescript(SCHEMA)
             self._ready = True
-        return conn
+
+    def _connect(self) -> sqlite3.Connection:
+        if not self._ready:
+            self._init()
+        return sqlite3.connect(self.path, timeout=10)
 
     # ── 書き込み ─────────────────────────────────────────────────────
     def add(self, rows: Iterable[Row]) -> int:

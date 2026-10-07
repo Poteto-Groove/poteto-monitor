@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from urllib.parse import urlsplit
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -305,15 +305,19 @@ def masked_view(raw: dict) -> dict:
     return view
 
 
-WEBHOOK_HOSTS = {"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"}
+# ユーザー情報・ポート・クエリ・フラグメント・バックスラッシュを含む URL は、
+# 検証側と送信側（requests / urllib3）でホストの解釈が食い違い得るため、正規形だけを許可する。
+WEBHOOK_RE = re.compile(
+    r"https://(?:discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)"
+    r"/api/webhooks/[0-9]+/[A-Za-z0-9_-]+"
+)
 MIN_TOKEN_LENGTH = 12
 
 
 def validate_webhook_url(url: str) -> None:
     """UI から設定できる Webhook を Discord に限る（任意の宛先へ POST させる踏み台を防ぐ）。"""
-    parts = urlsplit(url)
-    if parts.scheme != "https" or parts.hostname not in WEBHOOK_HOSTS or not parts.path.startswith("/api/webhooks/"):
-        raise ConfigError("Webhook URL は https://discord.com/api/webhooks/... の形式である必要があります")
+    if not WEBHOOK_RE.fullmatch(url):
+        raise ConfigError("Webhook URL は https://discord.com/api/webhooks/<ID>/<トークン> の形式である必要があります")
 
 
 def merge_incoming(existing: dict, incoming: dict) -> dict:

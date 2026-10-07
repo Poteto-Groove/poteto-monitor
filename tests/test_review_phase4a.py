@@ -134,7 +134,7 @@ def _client(tmp_path, monkeypatch, web: dict, https: bool = False):
     ctx = AppContext(config_mod.load_config(), history=HistoryStore(tmp_path / "h.db"))
     ctx.fetcher.sources = {"fake": Source(types=("hyperliquid",), fetch=_fake)}
     base_url = "https://testserver" if https else "http://testserver"
-    return TestClient(server_mod.create_app(ctx), base_url=base_url)
+    return TestClient(server_mod.create_app(ctx), base_url=base_url, client=("127.0.0.1", 50000))
 
 
 def test_writes_disabled_without_token(tmp_path, monkeypatch):
@@ -219,3 +219,47 @@ def test_broken_config_returns_error_instead_of_defaults(tmp_path, monkeypatch):
         assert c.get("/api/config", headers=h).status_code == 500
         assert c.put("/api/config", json={"alert_threshold": 5}, headers=h).status_code == 500
         assert config_mod.CONFIG_FILE.read_text(encoding="utf-8") == "{ broken"  # 上書きしない
+
+
+# ── セキュリティレビューの追加指摘 ───────────────────────────────────
+@pytest.mark.parametrize("url", [
+    "https://evil.test\\@discord.com/api/webhooks/1/x",  # urlsplit と urllib3 で解釈が食い違う
+    "https://user@discord.com/api/webhooks/1/x",
+    "https://discord.com:8443/api/webhooks/1/x",
+    "https://discord.com/api/webhooks/1/x#@evil.test",
+    "https://discord.com/api/webhooks/1/x?wait=true",
+    "https://discord.com/api/webhooks/abc/x",
+    " https://discord.com/api/webhooks/1/x",
+])
+def test_webhook_rejects_ambiguous_urls(url):
+    from poteto_monitor.config import validate_webhook_url
+
+    with pytest.raises(ConfigError):
+        validate_webhook_url(url)
+
+
+def test_webhook_accepts_canonical_urls():
+    from poteto_monitor.config import validate_webhook_url
+
+    for url in ("https://discord.com/api/webhooks/123456/AbC-_9", "https://discordapp.com/api/webhooks/1/x",
+                "https://ptb.discord.com/api/webhooks/1/x", "https://canary.discord.com/api/webhooks/1/x"):
+        validate_webhook_url(url)
+
+
+def test_logout_revokes_session_server_side(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, {"auth_token": TOKEN}) as c:
+        c.post("/api/login", json={"token": TOKEN})
+        stolen = c.cookies.get("poteto_session")
+        c.post("/api/logout")
+        c.cookies.set("poteto_session", stolen)  # 盗まれた Cookie を後から使う
+        assert c.get("/api/config").status_code == 401
+
+
+def test_lockout_is_per_client(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, {"auth_token": TOKEN}) as c:
+        attacker = {"CF-Connecting-IP": "203.0.113.9"}
+        owner = {"CF-Connecting-IP": "198.51.100.7"}
+        for i in range(12):
+            c.post("/api/login", json={"token": f"bad{i}"}, headers=attacker)
+        assert c.post("/api/login", json={"token": "bad"}, headers=attacker).status_code == 429
+        assert c.post("/api/login", json={"token": TOKEN}, headers=owner).status_code == 200
