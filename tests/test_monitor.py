@@ -150,7 +150,8 @@ def test_fetch_hyperliquid_and_ratio():
 
 def test_hyperliquid_and_ratio_config_parsing():
     a = parse_config({"watch": [{"type": "hyperliquid", "coin": "hype"}]}).assets[0]
-    assert a.type == "hyperliquid" and a.coin == "HYPE" and a.key == "hl:HYPE"
+    # 銘柄名は入力のまま保ち（kPEPE 等のため）、キーは既存履歴との互換で大文字。
+    assert a.type == "hyperliquid" and a.coin == "hype" and a.key == "hl:HYPE"
 
     r = parse_config({"watch": [{"type": "ratio", "pair": "jpyc/usd-coin"}]}).assets[0]
     assert r.num == "jpyc" and r.den == "usd-coin"

@@ -143,6 +143,10 @@ main { max-width: 1160px; margin: 0 auto; padding: 28px 24px 64px; }
 .seg.active { border-color: var(--accent); color: var(--accent); }
 .chart-canvas { display: block; width: 100%; height: min(360px, 55vh); padding: 0 12px; box-sizing: border-box; }
 .chart-note { margin: 0; padding: 8px 20px 16px; }
+.login-panel { width: min(420px, 100%); }
+label.check { flex-direction: row; align-items: center; gap: 8px; }
+label.check input { width: auto; }
+#login { z-index: 30; }
 
 /* ── Drawer ──────────────────────────────────────────── */
 .drawer { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }

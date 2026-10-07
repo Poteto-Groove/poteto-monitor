@@ -124,32 +124,37 @@ sudo -u poteto /opt/poteto-monitor/venv/bin/poteto-monitor --dry-run   # 取得�
 
 ## ☁️ Cloudflare Tunnel で公開
 
-ローカル（`127.0.0.1`）で待ち受けたダッシュボードを、ポート開放なしで安全に外へ出せます。
+ローカル（`127.0.0.1`）で待ち受けたダッシュボードを、ポート開放なしで外へ出せます。
+ダッシュボード（Zero Trust → Networks → Tunnels）でトンネルを作り、Public Hostname の Service を
+`http://127.0.0.1:8787` にして、表示されたトークンで `cloudflared` をサービスとして登録します。
 
 ```bash
-# cloudflared 導入後
-cloudflared tunnel login
-cloudflared tunnel create poteto
+# トークンはシェル履歴に残らないよう、ファイル経由で渡す（例: /etc/cloudflared/token, 権限 600）
+sudo cloudflared service install "$(sudo cat /etc/cloudflared/token)"
 ```
 
-```yaml
-# ~/.cloudflared/config.yml
-tunnel: poteto
-credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
-ingress:
-  - hostname: monitor.example.com
-    service: http://127.0.0.1:8787
-  - service: http_status:404
-```
+### 🔒 公開時のアクセス制御（二重構え）
+
+| 層 | 守るもの | 設定 |
+|---|---|---|
+| **Cloudflare Access**（推奨・無料枠 50 人） | トンネルに入れる人（閲覧） | Self-hosted アプリとしてホスト名を登録し、許可するメールアドレスを Allow ポリシーに並べる（ワンタイム PIN など） |
+| **アプリのトークン** | 設定の変更・即時更新 | `WEB_AUTH_TOKEN`（推奨）または `web.auth_token`。ログイン画面で入力すると HttpOnly / SameSite=Strict の Cookie が発行されます |
+
+- トークン未設定のときは **読み取り専用** です（設定の保存・「今すぐ更新」は 403）。
+- `web.protect_read`（既定 `true`）が `true` だと、閲覧（価格・チャート・SSE）にもトークンが必要です。Cloudflare Access で閲覧者を絞っている場合は `false` にすると、友人にはトークンを渡さずに見てもらえます。
+- 認証の失敗が 10 分間に 10 回続くと、しばらく 429 を返します。
+- Webhook は UI からは `https://discord.com/api/webhooks/...` しか設定できず、待ち受けアドレス・ポートは UI から変更できません。
+- `/healthz` は外部監視用に認証なしで公開されます（返すのは各データソースの成否だけ）。Access の内側に置く場合は、
+  Uptime Kuma 側で [サービストークン](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) の
+  `CF-Access-Client-Id` / `CF-Access-Client-Secret` ヘッダーを付けて監視します。
+
+秘匿値は `config.json` ではなく、root 所有・権限 600 の `/etc/poteto-monitor/env` に置けます（ユニットが `EnvironmentFile=` で読み込みます）:
 
 ```bash
-cloudflared tunnel route dns poteto monitor.example.com
-cloudflared tunnel run poteto        # 常用は systemd 化推奨
+sudo install -m 600 /dev/null /etc/poteto-monitor/env
+echo "WEB_AUTH_TOKEN=$(openssl rand -base64 33)" | sudo tee -a /etc/poteto-monitor/env >/dev/null
+sudo systemctl restart poteto-monitor-web
 ```
-
-> 🔒 **公開時のセキュリティ** — 設定 API は銘柄や Webhook を編集できます。次のどちらかで必ず保護してください。
-> - **推奨**: [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) をトンネル前段に置く
-> - **簡易**: `config.json` の `web.auth_token`（または `WEB_AUTH_TOKEN`）を設定すると、UI/設定 API にトークンが必要になります
 
 ---
 
@@ -167,7 +172,8 @@ cloudflared tunnel run poteto        # 常用は systemd 化推奨
 | `alert_window` | `3600` | 急変アラートの比較期間（秒, 最小 60）。この秒数前の値と比べて閾値を超えたら通知 |
 | `alert_cooldown` | `3600` | 同じ銘柄のアラートを再送しない時間（秒）。再起動しても引き継ぎます |
 | `web.host` / `web.port` | `127.0.0.1` / `8787` | ダッシュボードの待受 |
-| `web.auth_token` | `""` | 設定すると UI/設定 API に認証を要求 |
+| `web.auth_token` | `""` | 設定の変更に必要なトークン（12 文字以上推奨, 環境変数 `WEB_AUTH_TOKEN` 優先）。未設定なら読み取り専用 |
+| `web.protect_read` | `true` | トークン設定時、閲覧（状態・履歴・SSE）にもトークンを求めるか |
 | `watch` | BTC/ETH/ドル円 | 監視対象リスト（下記） |
 
 **`watch` — 暗号資産 (`type: "crypto"`)**
@@ -231,7 +237,7 @@ SOURCES["mydex"] = Source(types=("mydex",), fetch=fetch_mydex)  # config の {"t
 ### 環境変数での上書き
 
 `DISCORD_WEBHOOK_URL` / `ALERT_THRESHOLD` / `BASE_CURRENCY` / `POLL_INTERVAL` /
-`WEB_HOST` / `WEB_PORT` / `WEB_AUTH_TOKEN` / `POTETO_DATA_DIR`
+`WEB_HOST` / `WEB_PORT` / `WEB_AUTH_TOKEN` / `WEB_PROTECT_READ` / `POTETO_DATA_DIR`
 
 ### 📈 履歴とヘルスチェック
 

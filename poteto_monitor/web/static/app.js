@@ -1,7 +1,6 @@
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
-const TOKEN_KEY = "poteto_token";
 const SPARK_RANGE = 86400; // 秒。カードのスパークラインに出す期間
 
 const cards = new Map();      // key -> card element
@@ -10,21 +9,44 @@ const rowEntries = new WeakMap(); // 設定行の要素 -> 読み込んだ元の
 const BADGE_LABEL = { crypto: "crypto", forex: "forex", hyperliquid: "HL", ratio: "rate" };
 const TPL = { crypto: "#tpl-crypto", forex: "#tpl-forex", hyperliquid: "#tpl-hyperliquid", ratio: "#tpl-ratio" };
 
-// ── 認証つき fetch ──────────────────────────────────────
-function authHeaders() {
-  const t = localStorage.getItem(TOKEN_KEY);
-  return t ? { "X-Auth-Token": t } : {};
+// ── 認証（HttpOnly Cookie。トークンはブラウザに保存しない）──
+let loginWaiters = [];
+function requestLogin(message) {
+  $("#login-error").textContent = message || "";
+  $("#login-error").classList.toggle("hidden", !message);
+  $("#login").classList.remove("hidden");
+  $("#login-token").value = "";
+  $("#login-token").focus();
+  return new Promise((resolve) => loginWaiters.push(resolve));
 }
+function finishLogin(ok) {
+  $("#login").classList.add("hidden");
+  const waiters = loginWaiters; loginWaiters = [];
+  waiters.forEach((w) => w(ok));
+}
+async function submitLogin() {
+  const res = await fetch("/api/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: $("#login-token").value }),
+  }).catch(() => null);
+  if (res && res.ok) { finishLogin(true); return; }
+  const err = res ? await res.json().catch(() => ({})) : {};
+  $("#login-error").textContent = (err.detail || "ログインできませんでした");
+  $("#login-error").classList.remove("hidden");
+}
+async function login(token) {
+  const res = await fetch("/api/login", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }),
+  });
+  return res.ok;
+}
+
 async function authFetch(url, opts = {}) {
-  opts.headers = Object.assign({}, opts.headers, authHeaders());
   let res = await fetch(url, opts);
-  if (res.status === 401) {
-    const t = prompt("Web 認証トークンを入力してください:");
-    if (t) {
-      localStorage.setItem(TOKEN_KEY, t);
-      opts.headers = Object.assign({}, opts.headers, authHeaders());
-      res = await fetch(url, opts);
-    }
+  if (res.status === 401 && await requestLogin()) res = await fetch(url, opts);
+  if (res.status === 403) {
+    const err = await res.clone().json().catch(() => ({}));
+    showBanner(err.detail || "この操作は許可されていません", true, "auth");
   }
   return res;
 }
@@ -48,13 +70,13 @@ function setConn(cls, text) {
 function render(snap) {
   if (snap.status === "error") {
     setConn("err", "取得エラー");
-    showBanner("取得に失敗しています: " + (snap.error || "不明なエラー"), true);
+    showBanner("取得に失敗しています: " + (snap.error || "不明なエラー"), true, "live");
   } else if (snap.status === "degraded") {
     setConn("ok", "ライブ接続中（一部取得失敗）");
-    showBanner("一部の銘柄を取得できていません（前回の値を表示中）: " + (snap.error || ""), false);
+    showBanner("一部の銘柄を取得できていません（前回の値を表示中）: " + (snap.error || ""), false, "live");
   } else {
     setConn("ok", "ライブ接続中");
-    hideBanner();
+    hideBanner("live"); // 設定・認証のエラー表示はライブ更新で消さない
   }
   $("#updated").textContent = snap.updated_at
     ? "更新 " + new Date(snap.updated_at).toLocaleTimeString() + "（毎" + snap.poll_interval + "秒）"
@@ -243,16 +265,31 @@ async function drawChart(range) {
   drawLine(canvas, pts, { color: trendColor(pct), axes: true });
 }
 
-function showBanner(msg, isErr) {
+// source: "live"（取得状況）/ "config" / "auth"。ライブ更新は自分が出したものだけ消す。
+let bannerSource = null;
+function showBanner(msg, isErr, source = "config") {
+  if (source === "live" && bannerSource && bannerSource !== "live") return;
   const b = $("#banner");
   b.textContent = msg; b.className = "banner" + (isErr ? " err" : "");
+  bannerSource = source;
 }
-function hideBanner() { $("#banner").classList.add("hidden"); }
+function hideBanner(source) {
+  if (source && bannerSource !== source) return;
+  $("#banner").classList.add("hidden");
+  bannerSource = null;
+}
 
 // ── 設定ドロワー ────────────────────────────────────────
 async function openSettings() {
   const res = await authFetch("/api/config");
-  if (!res.ok) { showBanner("設定を読み込めませんでした (" + res.status + ")", true); return; }
+  if (!res.ok) {
+    if (res.status !== 403) {
+      const err = await res.json().catch(() => ({}));
+      showBanner("設定を読み込めませんでした: " + (err.detail || res.status), true, "config");
+    }
+    return;
+  }
+  hideBanner("config"); hideBanner("auth");
   const cfg = await res.json();
   fillSettings(cfg);
   $("#drawer").classList.remove("hidden");
@@ -268,6 +305,7 @@ function fillSettings(cfg) {
   $("#cfg-webhook").value = "";
   $("#cfg-token").placeholder = (cfg.web && cfg.web.auth_configured) ? "設定済み（変更する場合のみ入力）" : "（任意）";
   $("#cfg-token").value = "";
+  $("#cfg-protect-read").checked = !cfg.web || cfg.web.protect_read !== false;
   const list = $("#watch-list"); list.innerHTML = "";
   (cfg.watch || []).forEach(addWatchRow);
   updateWatchCount();
@@ -370,7 +408,8 @@ async function saveSettings() {
   const webhook = $("#cfg-webhook").value.trim();
   if (webhook) payload.webhook_url = webhook;
   const token = $("#cfg-token").value.trim();
-  if (token) payload.web = { auth_token: token };
+  payload.web = { protect_read: $("#cfg-protect-read").checked };
+  if (token) payload.web.auth_token = token;
 
   $("#save-status").textContent = "保存中…";
   const res = await authFetch("/api/config", {
@@ -379,7 +418,7 @@ async function saveSettings() {
     body: JSON.stringify(payload),
   });
   if (res.ok) {
-    if (token) localStorage.setItem(TOKEN_KEY, token); // 認証を変更したら以後に使う
+    if (token) await login(token); // トークンを変えると既存のセッションは無効になるため、入れ直す
     $("#save-status").textContent = "✓ 反映しました";
     $("#cfg-error").classList.add("hidden");
     setTimeout(() => { $("#save-status").textContent = ""; closeSettings(); }, 700);
@@ -415,4 +454,17 @@ for (const seg of document.querySelectorAll("#chart .seg")) {
   });
 }
 
-loadHistory().finally(connect);
+$("#login-submit").addEventListener("click", submitLogin);
+$("#login-token").addEventListener("keydown", (e) => { if (e.key === "Enter") submitLogin(); });
+$("#login-cancel").addEventListener("click", () => finishLogin(false));
+
+// 閲覧に認証が必要な設定なら、先にログインしてから履歴とライブ接続を始める。
+async function start() {
+  const st = await fetch("/api/auth").then((r) => r.json()).catch(() => ({}));
+  if (st.protect_read && !st.authenticated) {
+    while (!(await requestLogin())) { /* 閲覧にはログインが必須 */ }
+  }
+  await loadHistory();
+  connect();
+}
+start();

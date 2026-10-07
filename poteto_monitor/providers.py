@@ -210,11 +210,16 @@ def fetch_hyperliquid(
     if not isinstance(mids, dict):
         raise ProviderError("Hyperliquid の応答が不正です")
 
+    upper: dict[str, list[str]] = {}
+    for name in mids:
+        upper.setdefault(name.upper(), []).append(name)
     for asset in assets:
-        sym = asset.coin
-        if sym not in mids:
-            result.errors[asset.key] = f"Hyperliquid に '{sym}' の mid がありません"
+        # 完全一致を優先し、無ければ大文字小文字を無視して 1 件だけ一致するものを使う。
+        candidates = [asset.coin] if asset.coin in mids else upper.get(asset.coin.upper(), [])
+        if len(candidates) != 1:
+            result.errors[asset.key] = f"Hyperliquid に '{asset.coin}' の mid がありません"
             continue
+        sym = candidates[0]
         value = float(mids[sym])
         result.readings.append(
             Reading(

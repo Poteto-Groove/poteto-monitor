@@ -8,6 +8,7 @@ import time
 from .. import config as config_mod
 from ..config import Config, load_config
 from ..history import HistoryStore
+from .auth import FailureLimiter
 from .fetcher import SourceScheduler
 from .state import LiveState
 
@@ -29,6 +30,7 @@ class AppContext:
         self.last_tick: float | None = None  # ポーラーが最後に 1 周した時刻（/healthz 用）
         self.last_prune: float = 0.0
         self.outage_notified: set[str] = set()  # 障害を通知済みのデータソース
+        self.auth_limiter = FailureLimiter()
 
     async def close(self) -> None:
         """終了時に送信中の通知を待ち（上限付き）、HTTP 接続を閉じる。"""

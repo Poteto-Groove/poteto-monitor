@@ -9,12 +9,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import ConfigError, load_config, masked_view, merge_incoming, read_raw, write_raw
 from ..history import sample_base
+from .auth import COOKIE_NAME, SESSION_TTL, is_https, make_session, session_valid, token_matches
 from .context import AppContext
 from .poller import poll_loop
 
@@ -24,23 +25,55 @@ HISTORY_RANGES = {"24h": 86400, "7d": 7 * 86400}
 HISTORY_POINTS = 240
 
 
-def _auth_dependency(ctx: AppContext):
-    """auth_token が設定されていれば API を保護する依存関数を返す。"""
+# 静的 UI は自前ファイルのみなので、外部読み込みもインライン実行も許可しない。
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
 
-    async def check(
-        authorization: str | None = Header(default=None),
-        x_auth_token: str | None = Header(default=None),
-    ) -> None:
+
+def _auth_dependencies(ctx: AppContext):
+    """(閲覧用, 書き込み用) の依存関数を返す。
+
+    - トークン未設定: 閲覧は誰でも可、書き込み（設定変更・即時更新）は 403（読み取り専用）。
+      公開時の保護は Cloudflare Access 等に委ねる。
+    - トークン設定済み: 書き込みは常に認証必須。閲覧は web.protect_read が true なら認証必須。
+    """
+    limiter = ctx.auth_limiter
+
+    def authenticated(request: Request, token: str) -> bool:
+        if session_valid(token, request.cookies.get(COOKIE_NAME)):
+            return True
+        supplied = request.headers.get("x-auth-token")
+        if supplied is None:
+            return False
+        limiter.check()
+        if token_matches(token, supplied):
+            return True
+        limiter.record_failure()
+        return False
+
+    async def read(request: Request) -> None:
         token = ctx.config.web_auth_token
-        if not token:
-            return  # 認証未設定なら誰でもアクセス可（Cloudflare Access 等に委ねる）
-        supplied = x_auth_token
-        if not supplied and authorization and authorization.lower().startswith("bearer "):
-            supplied = authorization[7:]
-        if supplied != token:
+        if token and ctx.config.web_protect_read and not authenticated(request, token):
             raise HTTPException(status_code=401, detail="認証が必要です")
 
-    return check
+    async def write(request: Request) -> None:
+        token = ctx.config.web_auth_token
+        if not token:
+            raise HTTPException(
+                status_code=403,
+                detail="web.auth_token が未設定のため読み取り専用です（config.json か WEB_AUTH_TOKEN で設定してください）",
+            )
+        if not authenticated(request, token):
+            raise HTTPException(status_code=401, detail="認証が必要です")
+
+    return read, write
 
 
 def create_app(ctx: AppContext | None = None) -> FastAPI:
@@ -62,9 +95,49 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
                 pass
             await ctx.close()
 
-    app = FastAPI(title="poteto-monitor", lifespan=lifespan)
+    # API ドキュメントは公開しない（エンドポイントの一覧を外部に見せない）。
+    app = FastAPI(title="poteto-monitor", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ctx = ctx
-    auth = _auth_dependency(ctx)
+    read_auth, write_auth = _auth_dependencies(ctx)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        for name, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
+        return response
+
+    # ── 認証 ─────────────────────────────────────────────────────────
+    @app.get("/api/auth")
+    async def auth_status(request: Request) -> dict:
+        """UI がログイン画面を出すかどうかの判断用。"""
+        token = ctx.config.web_auth_token
+        return {
+            "configured": bool(token),
+            "protect_read": bool(token) and ctx.config.web_protect_read,
+            "authenticated": session_valid(token, request.cookies.get(COOKIE_NAME)),
+        }
+
+    @app.post("/api/login")
+    async def login(request: Request, response: Response, payload: dict = Body(...)) -> dict:
+        token = ctx.config.web_auth_token
+        if not token:
+            raise HTTPException(status_code=403, detail="web.auth_token が未設定です")
+        ctx.auth_limiter.check()
+        if not token_matches(token, str(payload.get("token", ""))):
+            ctx.auth_limiter.record_failure()
+            log.warning("ログイン失敗（%s）", request.headers.get("cf-connecting-ip") or request.client)
+            raise HTTPException(status_code=401, detail="トークンが違います")
+        response.set_cookie(
+            COOKIE_NAME, make_session(token), max_age=SESSION_TTL, httponly=True,
+            samesite="strict", secure=is_https(request), path="/",
+        )
+        return {"ok": True}
+
+    @app.post("/api/logout")
+    async def logout(response: Response) -> dict:
+        response.delete_cookie(COOKIE_NAME, path="/")
+        return {"ok": True}
 
     # ── UI ───────────────────────────────────────────────────────────
     @app.get("/", include_in_schema=False)
@@ -74,11 +147,11 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     # ── 状態 API ─────────────────────────────────────────────────────
-    @app.get("/api/state")
+    @app.get("/api/state", dependencies=[Depends(read_auth)])
     async def get_state() -> dict:
         return ctx.state.snapshot()
 
-    @app.get("/api/stream")
+    @app.get("/api/stream", dependencies=[Depends(read_auth)])
     async def stream(request: Request) -> StreamingResponse:
         queue = ctx.state.subscribe()
 
@@ -90,8 +163,8 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
                     if await request.is_disconnected():
                         break
                     try:
-                        snap = await asyncio.wait_for(queue.get(), timeout=15)
-                        yield f"data: {json.dumps(snap)}\n\n"
+                        payload = await asyncio.wait_for(queue.get(), timeout=15)
+                        yield f"data: {payload}\n\n"
                     except asyncio.TimeoutError:
                         yield ": keep-alive\n\n"  # プロキシのタイムアウト対策
             finally:
@@ -100,7 +173,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         return StreamingResponse(event_source(), media_type="text/event-stream", headers=headers)
 
-    @app.get("/api/history")
+    @app.get("/api/history", dependencies=[Depends(read_auth)])
     def get_history(range_: str = Query("24h", alias="range"), key: str | None = None) -> dict:
         """履歴 DB の時系列（間引き済み）。同期関数なので FastAPI のスレッドプールで動く。"""
         span = HISTORY_RANGES.get(range_)
@@ -133,21 +206,29 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         return JSONResponse(body, status_code=200 if ok else 503)
 
     # ── 設定 API ─────────────────────────────────────────────────────
-    @app.get("/api/config", dependencies=[Depends(auth)])
-    async def get_config() -> dict:
-        return masked_view(read_raw())
-
-    @app.put("/api/config", dependencies=[Depends(auth)])
-    async def put_config(payload: dict) -> dict:
-        merged = merge_incoming(read_raw(), payload)
+    # 設定は秘匿値の有無や監視リストを含むため、閲覧にも書き込み用の認証を求める。
+    def _read_config() -> dict:
         try:
+            return read_raw()
+        except ConfigError as exc:
+            # 壊れた config.json を既定値で上書きしないよう、読めないときは操作を止める。
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/config", dependencies=[Depends(write_auth)])
+    async def get_config() -> dict:
+        return masked_view(_read_config())
+
+    @app.put("/api/config", dependencies=[Depends(write_auth)])
+    async def put_config(payload: dict) -> dict:
+        try:
+            merged = merge_incoming(_read_config(), payload)
             write_raw(merged)
         except ConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        ctx.reload()  # ポーラーへ即反映（間隔・銘柄・閾値）
-        return masked_view(read_raw())
+        ctx.reload()  # ポーラーへ即反映（間隔・銘柄・閾値・トークン）
+        return masked_view(_read_config())
 
-    @app.post("/api/refresh", dependencies=[Depends(auth)])
+    @app.post("/api/refresh", dependencies=[Depends(write_auth)])
     async def refresh() -> dict:
         # 間引かれた要求は直近の取得結果で足りるので、エラーにはしない。
         return {"ok": True, "queued": ctx.trigger_refresh()}
