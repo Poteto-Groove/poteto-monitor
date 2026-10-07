@@ -22,6 +22,8 @@ fi
 
 # ファイル配置（パッケージ一式をコピー）
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
+# 再実行（更新）時に、削除されたモジュールが古いまま残らないよう入れ替える。
+rm -rf "$INSTALL_DIR/poteto_monitor"
 cp -r "$SRC_DIR/poteto_monitor" "$SRC_DIR/pyproject.toml" "$SRC_DIR/requirements.txt" "$INSTALL_DIR/"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR" "$DATA_DIR"
 
@@ -47,7 +49,9 @@ fi
 cp "$SRC_DIR/poteto-monitor-web.service" /etc/systemd/system/
 cp "$SRC_DIR/poteto-monitor.service" "$SRC_DIR/poteto-monitor.timer" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now poteto-monitor-web.service
+systemctl enable poteto-monitor-web.service
+# 初回は起動、再実行（更新）時は新しいコードで再起動する。
+systemctl restart poteto-monitor-web.service
 
 # 読み出したポート番号（表示用）
 WEB_PORT="$(python3 -c "import json,sys; print(json.load(open('$CONFIG_FILE')).get('web',{}).get('port',8787))" 2>/dev/null || echo 8787)"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -250,7 +251,6 @@ def test_poller_restores_previous_and_alerts_in_background(tmp_path, monkeypatch
     prices = tmp_path / "prices.json"
     prices.write_text(json.dumps({"base_currency": "usd", "values": {"crypto:bitcoin": 100.0}}), encoding="utf-8")
     monkeypatch.setattr(poller_mod, "PRICES_FILE", prices)
-    monkeypatch.setattr(poller_mod, "HISTORY_FILE", tmp_path / "history.json")
     sent: list = []
     monkeypatch.setattr(poller_mod, "send", lambda url, embeds: sent.append(embeds))
 
@@ -261,7 +261,10 @@ def test_poller_restores_previous_and_alerts_in_background(tmp_path, monkeypatch
         ctx = AppContext(parse_config(raw))
         ctx.fetcher = _scheduler(Clock(), coingecko=FakeSource(value=120.0))
         poller_mod._restore_previous(ctx)
-        await poller_mod._tick(ctx, None)
+        # 段階 3 以降、急変アラートは履歴 DB の alert_window 秒前の値と比べる。
+        now = datetime.now(timezone.utc)
+        ctx.history.add([("crypto:bitcoin", "usd", int(now.timestamp()) - 3600, 100.0)])
+        await poller_mod._tick(ctx, now)
         snap = ctx.state.snapshot()
         await ctx.close()  # 送信タスクの完了を待つ
         return snap

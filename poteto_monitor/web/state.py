@@ -19,6 +19,8 @@ class LiveState:
         self.previous: dict[str, float] = {}  # 銘柄ごとの直近に取得できた値
         self.changes: dict[str, float | None] = {}  # 直前の取得からの変化率（update 時に確定）
         self.errors: dict[str, str] = {}  # 直近の取得に失敗している銘柄 -> 理由
+        self.changes_24h: dict[str, float | None] = {}  # 履歴 DB の 24 時間前の値からの変化率
+        self.sampled_at: dict[str, str] = {}  # 銘柄ごとの最後に新しい値を取得した時刻
         self._value_base: dict[str, str] = {}  # previous の値の単位になっている基準通貨（crypto のみ）
         self.updated_at: str | None = None
         self.status: str = "starting"  # starting | ok | degraded | error
@@ -49,6 +51,7 @@ class LiveState:
         *,
         fresh: set[str] | None = None,
         errors: dict[str, str] | None = None,
+        changes_24h: dict[str, float | None] | None = None,
     ) -> None:
         """取得結果を反映する。fresh に無い銘柄は前回の値と変化率をそのまま保つ（None なら全件が新しい値）。"""
         previous = self.comparable_previous(base_currency)
@@ -57,12 +60,15 @@ class LiveState:
             if fresh is not None and r.key not in fresh:
                 continue
             self.changes[r.key] = pct_change(previous.get(r.key, 0.0), r.value)
+            self.sampled_at[r.key] = updated_at
             self.previous[r.key] = r.value
             if r.type == "crypto":
                 self._value_base[r.key] = base_currency
             else:
                 self._value_base.pop(r.key, None)
         self.changes = {k: v for k, v in self.changes.items() if k in keys}
+        self.sampled_at = {k: v for k, v in self.sampled_at.items() if k in keys}
+        self.changes_24h = dict(changes_24h or {})
         self.readings = readings
         self.updated_at = updated_at
         self.errors = dict(errors or {})
@@ -90,6 +96,8 @@ class LiveState:
                     "display": r.display,
                     "value": r.value,
                     "change_pct": self.changes.get(r.key),
+                    "change_24h": self.changes_24h.get(r.key),
+                    "sampled_at": self.sampled_at.get(r.key),
                     "threshold": r.threshold,
                     "as_of": r.as_of,
                     "stale": r.key in self.errors,

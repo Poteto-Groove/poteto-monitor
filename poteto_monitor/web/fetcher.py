@@ -35,10 +35,22 @@ class FetchOutcome:
 
 
 @dataclass
+class SourceHealth:
+    ok: bool  # 直近の取得が成功しているか
+    failures: int  # 連続失敗回数
+    failing_since: float | None  # 失敗が続き始めた時刻（UNIX 秒）
+    last_success: float | None
+    error: str | None
+
+
+@dataclass
 class _SourceState:
     signature: tuple = ()
     next_due: float = 0.0
     failures: int = 0
+    failing_since: float | None = None
+    last_success: float | None = None
+    last_error: str | None = None
     readings: dict[str, Reading] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
 
@@ -76,8 +88,21 @@ class SourceScheduler:
             delay = max(delay, result.next_update - now + 60)
         state.next_due = now + delay
 
+    def health(self) -> dict[str, SourceHealth]:
+        """監視対象が使っているデータソースごとの状態。"""
+        return {
+            name: SourceHealth(
+                ok=s.failures == 0, failures=s.failures, failing_since=s.failing_since,
+                last_success=s.last_success, error=s.last_error,
+            )
+            for name, s in self._states.items()
+        }
+
     def _backoff(self, name: str, state: _SourceState, cfg: Config, now: float, exc: Exception) -> None:
         state.failures += 1
+        state.last_error = str(exc)
+        if state.failing_since is None:
+            state.failing_since = now
         delay = max(float(cfg.intervals.get(name, 0)), min(BACKOFF_MAX, BACKOFF_BASE * 2 ** (state.failures - 1)))
         if isinstance(exc, RateLimitError):
             delay = max(delay, exc.retry_after or RATE_LIMIT_WAIT)
@@ -104,6 +129,7 @@ class SourceScheduler:
                 state.errors = {}
                 state.signature = signature
                 state.failures = 0
+                state.failing_since = None
                 state.next_due = 0.0
             if now >= state.next_due:
                 due.append((name, assets, state))
@@ -122,6 +148,9 @@ class SourceScheduler:
                 state.errors = {a.key: str(result) for a in assets}
                 continue
             state.failures = 0
+            state.failing_since = None
+            state.last_error = None
+            state.last_success = now
             self._schedule(name, state, cfg, now, result)
             for r in result.readings:
                 state.readings[r.key] = r

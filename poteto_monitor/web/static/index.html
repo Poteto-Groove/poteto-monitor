@@ -87,6 +87,23 @@
     <div class="drawer-scrim" data-close></div>
   </div>
 
+  <!-- チャート（24 時間 / 7 日） -->
+  <div id="chart" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="chart-title">
+    <div class="drawer-scrim" data-close></div>
+    <div class="modal-panel">
+      <div class="drawer-head">
+        <h2 id="chart-title"></h2>
+        <div class="segs">
+          <button class="btn ghost seg active" data-range="24h">24時間</button>
+          <button class="btn ghost seg" data-range="7d">7日</button>
+          <button id="chart-close" class="btn ghost">✕</button>
+        </div>
+      </div>
+      <canvas id="chart-canvas" class="chart-canvas"></canvas>
+      <p id="chart-note" class="muted chart-note"></p>
+    </div>
+  </div>
+
   <!-- 監視行テンプレート -->
   <template id="tpl-crypto">
     <div class="watch-item" data-type="crypto">

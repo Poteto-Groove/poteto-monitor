@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import time
 
+from .. import config as config_mod
 from ..config import Config, load_config
+from ..history import HistoryStore
 from .fetcher import SourceScheduler
 from .state import LiveState
 
@@ -13,7 +15,7 @@ MIN_REFRESH_INTERVAL = 10  # 秒。「今すぐ更新」の連打で上流 API �
 
 
 class AppContext:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, history: HistoryStore | None = None) -> None:
         self.config = cfg
         self.state = LiveState()
         self.state.set_meta(poll_interval=cfg.poll_interval, base_currency=cfg.base_currency)
@@ -22,7 +24,11 @@ class AppContext:
         self.stop = asyncio.Event()
         self._last_refresh: float | None = None
         self.fetcher = SourceScheduler()
+        self.history = history or HistoryStore(config_mod.HISTORY_DB)
         self.background: set[asyncio.Task] = set()  # 実行中の Discord 送信タスク（GC 防止）
+        self.last_tick: float | None = None  # ポーラーが最後に 1 周した時刻（/healthz 用）
+        self.last_prune: float = 0.0
+        self.outage_notified: set[str] = set()  # 障害を通知済みのデータソース
 
     async def close(self) -> None:
         """終了時に送信中の通知を待ち（上限付き）、HTTP 接続を閉じる。"""

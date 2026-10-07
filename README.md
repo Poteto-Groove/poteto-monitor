@@ -163,7 +163,9 @@ cloudflared tunnel run poteto        # 常用は systemd 化推奨
 | `poll_interval` | `60` | 取得間隔（秒, 最小 5）。**UI の更新頻度**に直結 |
 | `intervals` | `{"coingecko": 300, "forex": 3600, "hyperliquid": 0}` | 常駐モードでのデータソースごとの最短取得間隔（秒）。`0` は毎回の poll で取得。為替は上流の次回更新時刻（1 日 1 回）まで再取得しません |
 | `report_interval` | `3600` | Discord 定期レポート間隔（秒, `0` で無効） |
-| `history_limit` | `168` | `history.json` に残す件数 |
+| `retention_days` | `30` | 履歴 DB（`history.db`）に残す日数。旧 `history_limit` は無視されます |
+| `alert_window` | `3600` | 急変アラートの比較期間（秒, 最小 60）。この秒数前の値と比べて閾値を超えたら通知 |
+| `alert_cooldown` | `3600` | 同じ銘柄のアラートを再送しない時間（秒）。再起動しても引き継ぎます |
 | `web.host` / `web.port` | `127.0.0.1` / `8787` | ダッシュボードの待受 |
 | `web.auth_token` | `""` | 設定すると UI/設定 API に認証を要求 |
 | `watch` | BTC/ETH/ドル円 | 監視対象リスト（下記） |
@@ -230,6 +232,24 @@ SOURCES["mydex"] = Source(types=("mydex",), fetch=fetch_mydex)  # config の {"t
 
 `DISCORD_WEBHOOK_URL` / `ALERT_THRESHOLD` / `BASE_CURRENCY` / `POLL_INTERVAL` /
 `WEB_HOST` / `WEB_PORT` / `WEB_AUTH_TOKEN` / `POTETO_DATA_DIR`
+
+### 📈 履歴とヘルスチェック
+
+取得できた値は `/var/lib/poteto-monitor/history.db`（SQLite, 権限 600）に記録され、次に使われます。
+
+- **急変アラート**: `alert_window` 秒前の値と比較（既定は 1 時間前比）。`alert_cooldown` の間は同じ銘柄を再通知しません
+- **定期レポート**: 前回レポート時点の値と比較。送信時刻も記録するので、再起動しても間隔内には再送しません
+- **ダッシュボード**: カードに 24 時間変化率を表示。カードをクリックすると 24 時間 / 7 日のチャート
+- **データソース障害**: 取得失敗が 10 分続くと Discord に通知し、復旧時にも通知します
+
+`GET /healthz` はポーラーが動いていて全データソースの直近の取得が成功していれば `200`、そうでなければ `503` を返します（Uptime Kuma の HTTP 監視向け）。
+`GET /api/history?range=24h|7d[&key=...]` で時系列を取得できます。
+
+旧形式の `history.json`（v1 / v2）は次のコマンドで取り込めます（重複は無視）:
+
+```bash
+sudo -u poteto /opt/poteto-monitor/venv/bin/poteto-monitor import-history /var/lib/poteto-monitor/history.json
+```
 
 `COINGECKO_API_KEY` を設定すると CoinGecko の [Demo キー](https://www.coingecko.com/en/api/pricing)
 （`x-cg-demo-api-key`）を使います。キーは環境変数からのみ読み込み、`config.json` や UI には保存しません。
