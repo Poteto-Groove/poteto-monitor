@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,6 +58,7 @@ class Config:
     web_host: str = DEFAULT_WEB_HOST
     web_port: int = DEFAULT_WEB_PORT
     web_auth_token: str = ""
+    web_protect_read: bool = True  # トークン設定時、閲覧（状態・履歴・SSE）にも認証を求めるか
     intervals: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_INTERVALS))
     coingecko_api_key: str = ""  # Demo キー。環境変数 COINGECKO_API_KEY からのみ読む
     retention_days: int = DEFAULT_RETENTION_DAYS
@@ -136,14 +138,15 @@ def _parse_asset(raw: dict, index: int, default_threshold: float) -> Asset:
         )
 
     if atype == "hyperliquid":
-        coin = str(raw.get("coin", "")).strip().upper()
+        # kPEPE のように小文字を含む銘柄があるため大文字化しない（照合は providers 側で行う）。
+        coin = str(raw.get("coin", "")).strip()
         if not coin:
             raise ConfigError(f"watch[{index}] (hyperliquid) には 'coin' が必要です（例: HYPE, BTC）")
         market = str(raw.get("market", "perp")).strip().lower()
         label = str(raw.get("label") or f"{coin} (Hyperliquid)")
         return Asset(
             type="hyperliquid",
-            key=raw.get("key") or f"hl:{coin}",
+            key=raw.get("key") or f"hl:{coin.upper()}",
             label=label,
             emoji=str(raw.get("emoji", "⚡")),
             threshold=threshold,
@@ -234,6 +237,7 @@ def parse_config(raw: dict) -> Config:
         web_host=str(os.environ.get("WEB_HOST") or web.get("host", DEFAULT_WEB_HOST)),
         web_port=_to_int(os.environ.get("WEB_PORT") or web.get("port", DEFAULT_WEB_PORT), "web.port"),
         web_auth_token=str(os.environ.get("WEB_AUTH_TOKEN") or web.get("auth_token", "")),
+        web_protect_read=_as_bool(os.environ.get("WEB_PROTECT_READ") or web.get("protect_read", True)),
         intervals=intervals,
         coingecko_api_key=os.environ.get("COINGECKO_API_KEY", "").strip(),
         retention_days=retention_days,
@@ -264,12 +268,14 @@ def read_raw(path: Path | None = None) -> dict:
     path = path or CONFIG_FILE
     raw: dict = {}
     if path.exists():
+        # 壊れたまま既定値で補完すると、UI から保存したときに手書きの設定が失われるためエラーにする。
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                raw = loaded
-        except json.JSONDecodeError:
-            raw = {}
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"{path} の JSON が不正です: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ConfigError(f"{path} はオブジェクトである必要があります")
+        raw = loaded
     raw.setdefault("watch", list(DEFAULT_WATCH))
     raw.setdefault("alert_threshold", DEFAULT_THRESHOLD)
     raw.setdefault("base_currency", "usd")
@@ -278,9 +284,11 @@ def read_raw(path: Path | None = None) -> dict:
     raw.setdefault("report_interval", DEFAULT_REPORT_INTERVAL)
     web = raw.get("web") if isinstance(raw.get("web"), dict) else {}
     raw["web"] = {
+        **web,
         "host": web.get("host", DEFAULT_WEB_HOST),
         "port": web.get("port", DEFAULT_WEB_PORT),
         "auth_token": web.get("auth_token", ""),
+        "protect_read": web.get("protect_read", True),
     }
     return raw
 
@@ -297,8 +305,22 @@ def masked_view(raw: dict) -> dict:
     return view
 
 
+WEBHOOK_HOSTS = {"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"}
+MIN_TOKEN_LENGTH = 12
+
+
+def validate_webhook_url(url: str) -> None:
+    """UI から設定できる Webhook を Discord に限る（任意の宛先へ POST させる踏み台を防ぐ）。"""
+    parts = urlsplit(url)
+    if parts.scheme != "https" or parts.hostname not in WEBHOOK_HOSTS or not parts.path.startswith("/api/webhooks/"):
+        raise ConfigError("Webhook URL は https://discord.com/api/webhooks/... の形式である必要があります")
+
+
 def merge_incoming(existing: dict, incoming: dict) -> dict:
-    """UI から来た設定を既存にマージ（空の秘匿値は現状維持）。"""
+    """UI から来た設定を既存にマージ（空の秘匿値は現状維持）。
+
+    待ち受けアドレス・ポートは UI からは変更できない（config.json か環境変数で設定する）。
+    """
     merged = json.loads(json.dumps(existing))
     for key in (
         "alert_threshold", "base_currency", "retention_days", "alert_window", "alert_cooldown",
@@ -310,15 +332,17 @@ def merge_incoming(existing: dict, incoming: dict) -> dict:
     # Webhook: 空文字なら現状維持、値があれば更新。
     new_hook = str(incoming.get("webhook_url", "")).strip()
     if new_hook and new_hook != WEBHOOK_MASK:
+        validate_webhook_url(new_hook)
         merged["webhook_url"] = new_hook
 
     inc_web = incoming.get("web") if isinstance(incoming.get("web"), dict) else {}
     web = merged.get("web") if isinstance(merged.get("web"), dict) else {}
-    for key in ("host", "port"):
-        if key in inc_web:
-            web[key] = inc_web[key]
+    if "protect_read" in inc_web:
+        web["protect_read"] = _as_bool(inc_web["protect_read"])
     new_token = str(inc_web.get("auth_token", "")).strip()
     if new_token:
+        if len(new_token) < MIN_TOKEN_LENGTH:
+            raise ConfigError(f"Web 認証トークンは {MIN_TOKEN_LENGTH} 文字以上にしてください")
         web["auth_token"] = new_token
     merged["web"] = web
     return merged

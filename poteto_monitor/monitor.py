@@ -45,9 +45,6 @@ def run(cfg: Config, *, dry_run: bool = False) -> int:
         log.info("--dry-run: Discord 送信と状態保存をスキップしました")
         return 0
 
-    send(cfg.webhook_url, embeds)
-    log.info("Discord に通知しました (%s UTC)", now_str)
-
     # 前回価格を更新（次回の変化率計算用）。
     save_json(
         PRICES_FILE,
@@ -59,6 +56,10 @@ def run(cfg: Config, *, dry_run: bool = False) -> int:
     ts = int(now.timestamp())
     store.add((r.key, sample_base(r.type, cfg.base_currency), ts, r.value) for r in readings)
     store.prune(ts - cfg.retention_days * 86400)
+
+    # 保存の後に送る（送信に失敗しても次回は直前の値と比べられるように）。
+    send(cfg.webhook_url, embeds)
+    log.info("Discord に通知しました (%s UTC)", now_str)
     return 0
 
 

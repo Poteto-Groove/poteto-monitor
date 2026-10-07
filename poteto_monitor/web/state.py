@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from ..format import pct_change
@@ -122,10 +123,12 @@ class LiveState:
         self._subscribers.discard(q)
 
     def broadcast(self) -> None:
-        """現在のスナップショットを全購読者へ配信（詰まっている購読者はスキップ）。"""
-        snap = self.snapshot()
+        """現在のスナップショットを JSON 文字列にして全購読者へ配信する（変換は 1 回だけ）。
+
+        詰まっている購読者は古いものから捨てる（スナップショットは最新だけ届けば十分）。
+        """
+        payload = json.dumps(self.snapshot())
         for q in list(self._subscribers):
-            try:
-                q.put_nowait(snap)
-            except asyncio.QueueFull:
-                pass
+            if q.full():
+                q.get_nowait()
+            q.put_nowait(payload)

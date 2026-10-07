@@ -33,17 +33,20 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "CONFIG_FILE", cfg_file)
     monkeypatch.setattr(poller_mod, "PRICES_FILE", tmp_path / "prices.json")
 
+    # 書き込み API はトークン設定時のみ使える（段階 4a の S-2）。
     cfg_file.write_text(
         '{"webhook_url":"","poll_interval":300,"report_interval":0,'
+        '"web":{"auth_token":"test-token-1234"},'
         '"watch":[{"type":"crypto","id":"bitcoin","label":"BTC"}]}',
         encoding="utf-8",
     )
+    monkeypatch.delenv("WEB_AUTH_TOKEN", raising=False)
     from poteto_monitor.web.context import AppContext
 
     ctx = AppContext(config_mod.load_config())
     ctx.fetcher.sources = FAKE_SOURCES  # ポーラーがネットワークに出ないようスタブ化。
     app = server_mod.create_app(ctx)
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-Auth-Token": "test-token-1234"}) as c:
         yield c
 
 
@@ -83,10 +86,10 @@ def test_invalid_config_rejected(client):
 
 
 def test_auth_required_when_token_set(client):
-    # トークンを設定 → 以降 config API は認証必須。
-    client.put("/api/config", json={"web": {"auth_token": "s3cret"}})
+    # トークンを変更 → 以降は新しいトークンが必要。
+    client.put("/api/config", json={"web": {"auth_token": "s3cret-new-token"}})
     assert client.get("/api/config").status_code == 401
-    ok = client.get("/api/config", headers={"X-Auth-Token": "s3cret"})
+    ok = client.get("/api/config", headers={"X-Auth-Token": "s3cret-new-token"})
     assert ok.status_code == 200
 
 

@@ -66,6 +66,10 @@
           <label>Web 認証トークン（任意）
             <input id="cfg-token" type="password" placeholder="（変更する場合のみ入力）" autocomplete="off" />
           </label>
+          <label class="check">
+            <input id="cfg-protect-read" type="checkbox" />
+            閲覧（価格・チャート）にもトークンを求める（Cloudflare Access で守る場合は外してよい）
+          </label>
         </fieldset>
 
         <fieldset>
@@ -85,6 +89,24 @@
       </div>
     </div>
     <div class="drawer-scrim" data-close></div>
+  </div>
+
+  <!-- ログイン -->
+  <div id="login" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <div class="drawer-scrim"></div>
+    <div class="modal-panel login-panel">
+      <div class="drawer-head"><h2 id="login-title">🔒 ログイン</h2></div>
+      <div class="drawer-body">
+        <div id="login-error" class="banner err hidden"></div>
+        <label>Web 認証トークン
+          <input id="login-token" type="password" autocomplete="current-password" />
+        </label>
+      </div>
+      <div class="drawer-foot">
+        <button id="login-cancel" class="btn ghost">キャンセル</button>
+        <button id="login-submit" class="btn primary">ログイン</button>
+      </div>
+    </div>
   </div>
 
   <!-- チャート（24 時間 / 7 日） -->

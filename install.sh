@@ -43,6 +43,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo ""
 fi
 
+# 秘匿値用の環境ファイル置き場（root のみ。中身はユニットの EnvironmentFile= で読む）
+install -d -m 700 -o root -g root /etc/poteto-monitor
+
 # systemd ユニット配置
 # - poteto-monitor-web.service : 常駐（Web ダッシュボード + ポーラー + Discord 通知）※既定で有効化
 # - poteto-monitor.service/.timer : 毎時 1 回だけ通知する軽量モード（Web 不要な人向け・既定では無効）

@@ -8,12 +8,34 @@ Type=oneshot
 User=poteto
 WorkingDirectory=/opt/poteto-monitor
 ExecStart=/opt/poteto-monitor/venv/bin/poteto-monitor
+# 秘匿値（WEB_AUTH_TOKEN, DISCORD_WEBHOOK_URL, COINGECKO_API_KEY など）は root 所有・600 の環境ファイルへ。
+EnvironmentFile=-/etc/poteto-monitor/env
 StandardOutput=journal
 StandardError=journal
 
-# 最小権限で動かすための systemd ハードニング
+# 最小権限で動かすための systemd ハードニング（`systemd-analyze security <unit>` で確認できる）
 NoNewPrivileges=true
+UMask=0077
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
 ReadWritePaths=/var/lib/poteto-monitor

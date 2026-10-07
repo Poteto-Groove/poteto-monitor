@@ -78,7 +78,49 @@ def find_alerts(readings: list[Reading], previous: dict[str, float]) -> list[tup
     return alerts
 
 
+# Discord の上限: embed あたりのフィールド 25 個、1 メッセージの embed 10 個・合計 6,000 文字。
+MAX_FIELDS = 25
+MAX_EMBEDS = 10
+MAX_CHARS = 6000
+
+
+def _embed_chars(embed: dict) -> int:
+    return (
+        len(embed.get("title", "")) + len(embed.get("description", ""))
+        + len((embed.get("footer") or {}).get("text", ""))
+        + sum(len(f.get("name", "")) + len(f.get("value", "")) for f in embed.get("fields", []))
+    )
+
+
+def split_messages(embeds: list[dict]) -> list[list[dict]]:
+    """embed を Discord の上限に収まるよう分割し、メッセージ単位にまとめる。"""
+    parts: list[dict] = []
+    for embed in embeds:
+        fields = embed.get("fields", [])
+        if len(fields) <= MAX_FIELDS:
+            parts.append(embed)
+            continue
+        chunks = [fields[i : i + MAX_FIELDS] for i in range(0, len(fields), MAX_FIELDS)]
+        for n, chunk in enumerate(chunks, 1):
+            parts.append({**embed, "title": f"{embed.get('title', '')} ({n}/{len(chunks)})", "fields": chunk})
+
+    messages: list[list[dict]] = []
+    current: list[dict] = []
+    chars = 0
+    for embed in parts:
+        size = _embed_chars(embed)
+        if current and (len(current) >= MAX_EMBEDS or chars + size > MAX_CHARS):
+            messages.append(current)
+            current, chars = [], 0
+        current.append(embed)
+        chars += size
+    if current:
+        messages.append(current)
+    return messages
+
+
 def send(webhook_url: str, embeds: list[dict], *, session: requests.Session | None = None) -> None:
     http = session or requests
-    resp = http.post(webhook_url, json={"embeds": embeds}, timeout=TIMEOUT)
-    resp.raise_for_status()
+    for message in split_messages(embeds):
+        resp = http.post(webhook_url, json={"embeds": message}, timeout=TIMEOUT)
+        resp.raise_for_status()
