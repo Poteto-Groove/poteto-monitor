@@ -130,7 +130,7 @@ main { max-width: 1160px; margin: 0 auto; padding: 28px 24px 64px; }
 .drawer { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }
 .drawer-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
 .drawer-panel {
-  position: relative; width: min(560px, 100%); background: var(--bg-elev);
+  position: relative; z-index: 1; width: min(560px, 100%); background: var(--bg-elev);
   border-left: 1px solid var(--border); display: flex; flex-direction: column;
   height: 100%; box-shadow: var(--shadow); animation: slideIn .2s ease;
 }
@@ -159,6 +159,7 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .watch-item .w-emoji { flex: 0 0 44px; text-align: center; }
 .watch-item .w-threshold { flex: 0 0 74px; }
 .watch-item .w-del { flex: 0 0 auto; padding: 6px 9px; }
+.watch-item input.invalid { border-color: var(--down); }
 .add-row { display: flex; gap: 10px; }
 
 @media (max-width: 560px) { .row { grid-template-columns: 1fr; } .topbar { padding: 14px; } }

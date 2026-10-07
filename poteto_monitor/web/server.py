@@ -112,7 +112,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
 
     @app.post("/api/refresh", dependencies=[Depends(auth)])
     async def refresh() -> dict:
-        ctx.trigger_refresh()
-        return {"ok": True}
+        # 間引かれた要求は直近の取得結果で足りるので、エラーにはしない。
+        return {"ok": True, "queued": ctx.trigger_refresh()}
 
     return app

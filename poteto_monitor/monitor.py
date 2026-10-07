@@ -78,7 +78,8 @@ def serve(cfg: Config) -> int:
     log.info("Web ダッシュボードを起動: http://%s:%d", cfg.web_host, cfg.web_port)
     if not cfg.web_auth_token:
         log.warning("web.auth_token 未設定です。公開する場合は Cloudflare Access 等で保護してください。")
-    uvicorn.run(app, host=cfg.web_host, port=cfg.web_port, log_level="info")
+    # SSE 接続が残っていても停止できるよう、終了待ちに上限を設ける。
+    uvicorn.run(app, host=cfg.web_host, port=cfg.web_port, log_level="info", timeout_graceful_shutdown=3)
     return 0
 
 

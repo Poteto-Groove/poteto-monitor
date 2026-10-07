@@ -6,6 +6,7 @@ const SPARK_MAX = 60;
 
 const cards = new Map();      // key -> card element
 const series = new Map();     // key -> number[] (直近の値)
+const rowEntries = new WeakMap(); // 設定行の要素 -> 読み込んだ元の watch エントリ
 const BADGE_LABEL = { crypto: "crypto", forex: "forex", hyperliquid: "HL", ratio: "rate" };
 const TPL = { crypto: "#tpl-crypto", forex: "#tpl-forex", hyperliquid: "#tpl-hyperliquid", ratio: "#tpl-ratio" };
 
@@ -169,16 +170,33 @@ function fillSettings(cfg) {
   updateWatchCount();
 }
 
+// "pair" 形式を base/quote（ratio は num/den）に展開する。規則は config.py と同じ。
+function expandPair(entry) {
+  if (!entry.pair) return entry;
+  const { pair, ...rest } = entry;
+  if (entry.type === "forex" && !entry.base && !entry.quote) {
+    const parts = String(pair).replace(/-/g, "/").split("/");
+    if (parts.length === 2) return { ...rest, base: parts[0].trim(), quote: parts[1].trim() };
+  } else if (entry.type === "ratio" && !entry.num && !entry.den) {
+    const parts = String(pair).split("/");
+    if (parts.length === 2) return { ...rest, num: parts[0].trim(), den: parts[1].trim() };
+  }
+  return entry;
+}
+
 function addWatchRow(entry) {
+  entry = expandPair(entry);
   const type = TPL[entry.type] ? entry.type : "crypto";
   const node = $(TPL[type]).content.firstElementChild.cloneNode(true);
+  rowEntries.set(node, entry);
   node.querySelector(".w-emoji").value = entry.emoji || "";
   node.querySelector(".w-label").value = entry.label || "";
   const thr = entry.threshold;
   node.querySelector(".w-threshold").value = (thr === undefined || thr === null) ? "" : thr;
   if (type === "crypto") {
     node.querySelector(".w-id").value = entry.id || "";
-    node.querySelector(".w-vs").value = (entry.vs || ["usd", "jpy"]).join(",");
+    const vs = entry.vs ?? ["usd", "jpy"];
+    node.querySelector(".w-vs").value = Array.isArray(vs) ? vs.join(",") : String(vs);
   } else if (type === "forex") {
     node.querySelector(".w-base").value = entry.base || "";
     node.querySelector(".w-quote").value = entry.quote || "";
@@ -189,51 +207,62 @@ function addWatchRow(entry) {
     node.querySelector(".w-den").value = entry.den || "";
   }
   node.querySelector(".w-del").addEventListener("click", () => { node.remove(); updateWatchCount(); });
+  node.addEventListener("input", (ev) => ev.target.classList.remove("invalid"));
   $("#watch-list").appendChild(node);
   updateWatchCount();
 }
 function updateWatchCount() { $("#watch-count").textContent = "(" + $("#watch-list").children.length + ")"; }
 
+// 種別ごとの必須入力欄（クラス名 → エントリのキー）。
+const REQUIRED = {
+  crypto: { ".w-id": "id" },
+  forex: { ".w-base": "base", ".w-quote": "quote" },
+  hyperliquid: { ".w-coin": "coin" },
+  ratio: { ".w-num": "num", ".w-den": "den" },
+};
+
+// 元のエントリを土台に UI の入力だけを上書きする（key など UI に無い項目は残す）。
+// 必須欄が空の行は捨てずに errors に積む。
 function collectWatch() {
-  const out = [];
-  for (const item of $("#watch-list").children) {
+  const watch = [], errors = [];
+  [...$("#watch-list").children].forEach((item, i) => {
     const type = item.dataset.type;
-    const emoji = item.querySelector(".w-emoji").value.trim();
-    const label = item.querySelector(".w-label").value.trim();
+    const e = { ...(rowEntries.get(item) || {}), type };
+    const setOpt = (k, v) => { if (v === "") delete e[k]; else e[k] = v; };
+    setOpt("emoji", item.querySelector(".w-emoji").value.trim());
+    setOpt("label", item.querySelector(".w-label").value.trim());
     const thrRaw = item.querySelector(".w-threshold").value.trim();
-    const e = { type };
-    if (emoji) e.emoji = emoji;
-    if (label) e.label = label;
-    if (thrRaw !== "") e.threshold = Number(thrRaw);
+    setOpt("threshold", thrRaw === "" ? "" : Number(thrRaw));
     if (type === "crypto") {
-      e.id = item.querySelector(".w-id").value.trim();
       const vs = item.querySelector(".w-vs").value.split(",").map((s) => s.trim()).filter(Boolean);
-      if (vs.length) e.vs = vs;
-      if (!e.id) continue;
-    } else if (type === "forex") {
-      e.base = item.querySelector(".w-base").value.trim();
-      e.quote = item.querySelector(".w-quote").value.trim();
-      if (!e.base || !e.quote) continue;
-    } else if (type === "hyperliquid") {
-      e.coin = item.querySelector(".w-coin").value.trim();
-      if (!e.coin) continue;
-    } else if (type === "ratio") {
-      e.num = item.querySelector(".w-num").value.trim();
-      e.den = item.querySelector(".w-den").value.trim();
-      if (!e.num || !e.den) continue;
+      if (vs.length) e.vs = vs; else delete e.vs;
     }
-    out.push(e);
-  }
-  return out;
+    let missing = false;
+    for (const [sel, k] of Object.entries(REQUIRED[type] || {})) {
+      const input = item.querySelector(sel);
+      e[k] = input.value.trim();
+      input.classList.toggle("invalid", !e[k]);
+      if (!e[k]) missing = true;
+    }
+    if (missing) errors.push(`${i + 1} 行目 (${type}) の必須項目が空です`);
+    watch.push(e);
+  });
+  return { watch, errors };
 }
 
 async function saveSettings() {
+  const { watch, errors } = collectWatch();
+  if (errors.length) {
+    $("#cfg-error").textContent = "保存できませんでした: " + errors.join(" / ");
+    $("#cfg-error").classList.remove("hidden");
+    return;
+  }
   const payload = {
     base_currency: $("#cfg-base").value.trim() || "usd",
     alert_threshold: Number($("#cfg-threshold").value || 10),
     poll_interval: Number($("#cfg-poll").value || 60),
     report_interval: Number($("#cfg-report").value || 0),
-    watch: collectWatch(),
+    watch,
   };
   const webhook = $("#cfg-webhook").value.trim();
   if (webhook) payload.webhook_url = webhook;

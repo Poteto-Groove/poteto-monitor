@@ -35,7 +35,9 @@ async def _tick(ctx: AppContext, last_report_at: datetime | None) -> datetime | 
     now = datetime.now(timezone.utc)
 
     # 前回ポーリング比でアラート判定（リアルタイムの急変検知）。
-    alerts = find_alerts(readings, ctx.state.previous)
+    # 基準通貨が変わった銘柄は単位が違うので比較しない。
+    previous = ctx.state.comparable_previous(cfg.base_currency)
+    alerts = find_alerts(readings, previous)
 
     embeds = []
     now_str = now.strftime("%Y-%m-%d %H:%M")
@@ -43,7 +45,7 @@ async def _tick(ctx: AppContext, last_report_at: datetime | None) -> datetime | 
         last_report_at is None or (now - last_report_at).total_seconds() >= cfg.report_interval
     )
     if send_report:
-        embeds.append(build_report_embed(readings, ctx.state.previous, now_str))
+        embeds.append(build_report_embed(readings, previous, now_str))
     if alerts:
         embeds.append(build_alert_embed(alerts, now_str))
         log.warning("アラート %d 件: %s", len(alerts), [r.label for r, _ in alerts])
@@ -54,8 +56,8 @@ async def _tick(ctx: AppContext, last_report_at: datetime | None) -> datetime | 
         except Exception as exc:  # noqa: BLE001 - 通知失敗で監視自体は止めない
             log.error("Discord 送信に失敗: %s", exc)
 
-    # ライブ状態を更新して配信。
-    ctx.state.update(readings, now.isoformat())
+    # ライブ状態を更新して配信（変化率の確定と previous の更新もここで行う）。
+    ctx.state.update(readings, now.isoformat(), cfg.base_currency)
     ctx.state.broadcast()
 
     # 永続化: prices.json は毎回、history.json はレポート時のみ追記。
@@ -71,8 +73,6 @@ async def _tick(ctx: AppContext, last_report_at: datetime | None) -> datetime | 
         )
         await asyncio.to_thread(save_json, HISTORY_FILE, history[-cfg.history_limit :])
 
-    # 次回比較のため previous を更新。
-    ctx.state.previous = {r.key: r.value for r in readings}
     return now if send_report else last_report_at
 
 

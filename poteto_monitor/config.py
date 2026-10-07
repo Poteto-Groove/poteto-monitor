@@ -59,18 +59,37 @@ def _as_bool(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _to_float(value, name: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"'{name}' は数値である必要があります: {value!r}") from None
+
+
+def _to_int(value, name: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"'{name}' は整数である必要があります: {value!r}") from None
+
+
 def _parse_asset(raw: dict, index: int, default_threshold: float) -> Asset:
     if not isinstance(raw, dict):
         raise ConfigError(f"watch[{index}] はオブジェクトである必要があります")
 
     atype = str(raw.get("type", "")).strip().lower()
-    threshold = float(raw.get("threshold", default_threshold))
+    threshold = _to_float(raw.get("threshold", default_threshold), f"watch[{index}].threshold")
 
     if atype == "crypto":
         coin_id = str(raw.get("id", "")).strip().lower()
         if not coin_id:
             raise ConfigError(f"watch[{index}] (crypto) には 'id' が必要です")
-        vs = tuple(str(c).strip().lower() for c in raw.get("vs", ["usd", "jpy"]) if str(c).strip())
+        raw_vs = raw.get("vs", ["usd", "jpy"])
+        if isinstance(raw_vs, str):
+            raw_vs = raw_vs.split(",")  # "usd" / "usd,jpy" 形式も許可
+        elif not isinstance(raw_vs, list):
+            raise ConfigError(f"watch[{index}] (crypto) の 'vs' はリストである必要があります")
+        vs = tuple(str(c).strip().lower() for c in raw_vs if str(c).strip())
         if not vs:
             raise ConfigError(f"watch[{index}] (crypto) の 'vs' が空です")
         label = str(raw.get("label") or coin_id.upper())
@@ -149,8 +168,9 @@ def _parse_asset(raw: dict, index: int, default_threshold: float) -> Asset:
 
 def parse_config(raw: dict) -> Config:
     """辞書から Config を組み立てる（環境変数の上書きも適用）。"""
-    default_threshold = float(
-        os.environ.get("ALERT_THRESHOLD") or raw.get("alert_threshold", DEFAULT_THRESHOLD)
+    default_threshold = _to_float(
+        os.environ.get("ALERT_THRESHOLD") or raw.get("alert_threshold", DEFAULT_THRESHOLD),
+        "alert_threshold",
     )
     watch = raw.get("watch") or DEFAULT_WATCH
     if not isinstance(watch, list) or not watch:
@@ -166,19 +186,25 @@ def parse_config(raw: dict) -> Config:
         assets.append(asset)
 
     web = raw.get("web") if isinstance(raw.get("web"), dict) else {}
-    poll_interval = int(os.environ.get("POLL_INTERVAL") or raw.get("poll_interval", DEFAULT_POLL_INTERVAL))
-    report_interval = int(raw.get("report_interval", DEFAULT_REPORT_INTERVAL))
+    poll_interval = _to_int(
+        os.environ.get("POLL_INTERVAL") or raw.get("poll_interval", DEFAULT_POLL_INTERVAL), "poll_interval"
+    )
+    report_interval = _to_int(raw.get("report_interval", DEFAULT_REPORT_INTERVAL), "report_interval")
+    history_limit = _to_int(raw.get("history_limit", DEFAULT_HISTORY_LIMIT), "history_limit")
+    if history_limit < 1:
+        # history[-0:] は全件になるため 0 以下は受け付けない。
+        raise ConfigError("'history_limit' は 1 以上である必要があります")
 
     return Config(
         webhook_url=os.environ.get("DISCORD_WEBHOOK_URL") or raw.get("webhook_url", ""),
         alert_threshold=default_threshold,
         base_currency=str(os.environ.get("BASE_CURRENCY") or raw.get("base_currency", "usd")).lower(),
-        history_limit=int(raw.get("history_limit", DEFAULT_HISTORY_LIMIT)),
+        history_limit=history_limit,
         assets=assets,
         poll_interval=max(MIN_POLL_INTERVAL, poll_interval),
         report_interval=max(0, report_interval),
         web_host=str(os.environ.get("WEB_HOST") or web.get("host", DEFAULT_WEB_HOST)),
-        web_port=int(os.environ.get("WEB_PORT") or web.get("port", DEFAULT_WEB_PORT)),
+        web_port=_to_int(os.environ.get("WEB_PORT") or web.get("port", DEFAULT_WEB_PORT), "web.port"),
         web_auth_token=str(os.environ.get("WEB_AUTH_TOKEN") or web.get("auth_token", "")),
     )
 
@@ -268,5 +294,9 @@ def write_raw(raw: dict, path: Path | None = None) -> None:
     parse_config(raw)  # 不正なら ConfigError を送出
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Webhook / トークンを含むため umask に依らず 600 で作る（残骸があれば作り直す）。
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(raw, indent=2, ensure_ascii=False))
     tmp.replace(path)
